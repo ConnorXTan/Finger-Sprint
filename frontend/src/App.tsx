@@ -40,11 +40,13 @@ export default function App() {
         />
       )}
 
-      {showThumb && (
-        <div className="thumb-dock">
-          <WebcamThumb videoRef={engine.videoRef} landmarksRef={engine.landmarksRef} />
-        </div>
-      )}
+      {/* The webcam <video> stays mounted for the whole app lifetime so the
+          ref is valid the moment we attach the stream during `prepare()`. We
+          only hide it visually (opacity, not display:none — Safari won't play a
+          display:none video) until it's relevant. */}
+      <div className={`thumb-dock${showThumb ? "" : " is-hidden"}`}>
+        <WebcamThumb videoRef={engine.videoRef} landmarksRef={engine.landmarksRef} />
+      </div>
     </div>
   );
 }

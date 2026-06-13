@@ -470,6 +470,13 @@ body {
   right: 18px;
   bottom: 18px;
   z-index: 10;
+  transition: opacity 0.3s ease;
+}
+
+/* Kept mounted (so the video ref is always valid) but invisible until needed. */
+.thumb-dock.is-hidden {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .webcam-thumb {

@@ -19,11 +19,21 @@ export interface HandTracker {
  */
 export async function createHandTracker(): Promise<HandTracker> {
   const fileset = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM);
-  const landmarker = await HandLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: HAND_MODEL_URL, delegate: "GPU" },
-    runningMode: "VIDEO",
-    numHands: 1,
-  });
+  const make = (delegate: "GPU" | "CPU") =>
+    HandLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: HAND_MODEL_URL, delegate },
+      runningMode: "VIDEO",
+      numHands: 1,
+    });
+
+  // Prefer the GPU delegate; fall back to CPU on machines/browsers where WebGL
+  // isn't available so tracking still works (just a bit slower).
+  let landmarker: HandLandmarker;
+  try {
+    landmarker = await make("GPU");
+  } catch {
+    landmarker = await make("CPU");
+  }
 
   return {
     detect(video, timeMs) {
