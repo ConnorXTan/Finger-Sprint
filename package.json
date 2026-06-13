@@ -16,6 +16,6 @@
     "build": "npm run build -w @finger-sprint/frontend"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^10.0.0"
   }
 }
