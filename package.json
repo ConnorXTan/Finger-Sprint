@@ -1,0 +1,21 @@
+{
+  "name": "finger-sprint",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Webcam finger-speed running game — clean frontend/backend split.",
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,magenta \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "npm run dev -w @finger-sprint/backend",
+    "dev:frontend": "npm run dev -w @finger-sprint/frontend",
+    "typecheck": "npm run typecheck -w @finger-sprint/backend && npm run typecheck -w @finger-sprint/frontend",
+    "build": "npm run build -w @finger-sprint/frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
