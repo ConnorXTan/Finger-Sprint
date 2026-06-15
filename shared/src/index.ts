@@ -96,6 +96,8 @@ export interface StateMessage {
   /** Distance covered so far (units). */
   distance: number;
   score: number;
+  /** Live sustained-effort combo multiplier applied to incoming points (>= 1). */
+  multiplier: number;
   /** Milliseconds left in the round. */
   timeRemaining: number;
   finished: boolean;

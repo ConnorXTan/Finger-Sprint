@@ -144,8 +144,8 @@ Create a new session.
 // 201 Created
 {
   "sessionId": "uuid",
-  "durationMs": 30000,     // round length (authoritative)
-  "trackLength": 1000,     // distance units to the finish line
+  "durationMs": 90000,     // round length (authoritative)
+  "trackLength": 18000,    // distance units to the finish line
   "serverTimeMs": 1700000000000
 }
 ```
@@ -157,11 +157,11 @@ Finalize a session and return its score + provisional rank. Idempotent.
 // 200 OK
 {
   "sessionId": "uuid",
-  "score": 2394,
-  "distance": 1000,
+  "score": 9588,
+  "distance": 4032,
   "finished": true,
   "rank": 1,               // 1-based rank vs the persisted leaderboard
-  "durationMs": 30000
+  "durationMs": 90000
 }
 // 404 if the session doesn't exist
 ```
@@ -173,7 +173,7 @@ Top `N` scores (default 10, max 100), highest first.
 // 200 OK
 {
   "entries": [
-    { "id": 1, "name": "Ada", "score": 2394, "distance": 1000,
+    { "id": 1, "name": "Ada", "score": 14820, "distance": 7560,
       "createdAt": "2026-06-13T18:19:29.606Z", "rank": 1 }
   ]
 }
@@ -188,7 +188,7 @@ session — the client can't supply it).
 { "sessionId": "uuid", "name": "Ada" }
 
 // 201 Created
-{ "entry": { "id": 1, "name": "Ada", "score": 2394, "distance": 1000,
+{ "entry": { "id": 1, "name": "Ada", "score": 14820, "distance": 7560,
              "createdAt": "...", "rank": 1 } }
 
 // 400 if name is empty / missing
@@ -214,9 +214,10 @@ authoritative clock on connect and streams state until the round is `finished`.
   "type": "state",
   "position": 0.42,        // 0..1 progress along the track
   "speed": 410,            // current speed (units/s)
-  "distance": 420,         // distance covered
-  "score": 420,
-  "timeRemaining": 24800,  // ms left
+  "distance": 7560,        // distance covered
+  "score": 14820,          // banked, combo-weighted score
+  "multiplier": 2.3,       // live sustained-effort combo (>= 1)
+  "timeRemaining": 52400,  // ms left
   "finished": false
 }
 ```
@@ -240,6 +241,28 @@ Per video frame, [`movementIntensity.ts`](frontend/src/game/movementIntensity.ts
 When no hand is detected, the value decays toward 0 so the runner coasts to a stop
 rather than freezing. Every knob (`emaAlpha`, `scale`, which landmarks count) is a
 documented constant in `DEFAULT_TUNING`.
+
+---
+
+## Scoring
+
+All scoring is server-side ([`backend/src/game/engine.ts`](backend/src/game/engine.ts),
+tuned in [`backend/src/config.ts`](backend/src/config.ts)). A 90-second round works
+like this:
+
+- **Banked distance points.** Every tick you bank the ground covered × a points
+  rate. Because faster fingers cover more ground, speed is rewarded automatically.
+- **Sustained-effort combo (×1 → ×3).** A multiplier **builds** while you hold the
+  runner above a speed threshold and **decays ~2× faster** when you drop below it.
+  Banked points are weighted by the live multiplier, so consistent fast wiggling
+  scores far more than one-off bursts. The current combo streams in the `state`
+  message (`multiplier`) and shows live in the HUD.
+- **Finish bonus.** Reaching the finish line (`trackLength`, ~18k units — an
+  endurance goal that takes most of the round) adds a bonus per second left on the
+  clock. It's kept modest so it rewards a strong finish without dominating.
+
+This makes the leaderboard skill-expressive: distance, consistency, and a clean
+finish all matter. Tune any of it via the `game` block in `config.ts`.
 
 ---
 

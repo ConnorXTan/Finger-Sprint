@@ -14,6 +14,8 @@ export function Hud({
   const distance = state?.distance ?? 0;
   const speed = state?.speed ?? 0;
   const score = state?.score ?? 0;
+  const multiplier = state?.multiplier ?? 1;
+  const comboActive = multiplier > 1;
   // Effort gauge maxes out around the server's intensity clamp (120).
   const effort = Math.max(0, Math.min(1, intensity / 120));
 
@@ -21,6 +23,12 @@ export function Hud({
     <div className="hud">
       <div className="hud__top">
         <Stat label="Time" value={`${timeSec}s`} big accent={timeSec <= 5} />
+        {comboActive && (
+          <div className="combo" key={Math.floor(multiplier)}>
+            <span className="combo__x">×{multiplier.toFixed(1)}</span>
+            <span className="combo__label">combo</span>
+          </div>
+        )}
         <Stat label="Score" value={score.toLocaleString()} big />
       </div>
 

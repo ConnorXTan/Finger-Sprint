@@ -354,6 +354,45 @@ body {
   gap: 24px;
 }
 
+.combo {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  padding: 6px 18px;
+  border-radius: 14px;
+  background: rgba(255, 90, 95, 0.18);
+  border: 1px solid var(--accent-2);
+  box-shadow: 0 0 24px rgba(255, 90, 95, 0.35);
+  animation: combo-pop 0.35s ease;
+}
+
+.combo__x {
+  font-size: 1.9rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--accent-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.combo__label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+}
+
+@keyframes combo-pop {
+  0% {
+    transform: scale(0.7);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 .stat {
   background: rgba(10, 14, 24, 0.55);
   backdrop-filter: blur(4px);

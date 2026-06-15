@@ -20,7 +20,11 @@ export class GameSession {
   speed = 0;
   distance = 0;
   score = 0;
+  multiplier = 1;
   finished = false;
+
+  /** Running, banked score (distance covered each tick × the live multiplier). */
+  private scoreAcc = 0;
 
   // Internal clock / input bookkeeping.
   private startTime = 0;
@@ -77,7 +81,19 @@ export class GameSession {
       this.speed = Math.max(targetSpeed, this.speed - G.decelPerSec * dt);
     }
 
-    this.distance += this.speed * dt;
+    const distanceGained = this.speed * dt;
+    this.distance += distanceGained;
+
+    // Sustained-effort combo: builds while the runner is fast, bleeds away (and
+    // faster than it builds) once you slow down — so you have to keep going.
+    if (this.speed >= G.comboSpeedThreshold) {
+      this.multiplier = Math.min(G.maxMultiplier, this.multiplier + G.comboRampPerSec * dt);
+    } else {
+      this.multiplier = Math.max(1, this.multiplier - G.comboDecayPerSec * dt);
+    }
+
+    // Bank points for the ground covered this tick, weighted by the live combo.
+    this.scoreAcc += distanceGained * G.distanceToScore * this.multiplier;
 
     const timeRemaining = Math.max(0, G.durationMs - (now - this.startTime));
 
@@ -93,23 +109,22 @@ export class GameSession {
       return;
     }
 
-    this.score = this.computeScore(timeRemaining);
+    this.score = Math.round(this.scoreAcc);
     this.emit(now, timeRemaining);
   }
 
-  /** Server-side scoring — the single source of truth for a session's score. */
-  private computeScore(timeRemaining: number): number {
-    const base = this.distance * G.distanceToScore;
+  /** Finalize the banked score, adding the finish-line time bonus if earned. */
+  private finalizeScore(timeRemaining: number): number {
     const bonus =
       this.distance >= G.trackLength ? (timeRemaining / 1000) * G.finishTimeBonus : 0;
-    return Math.round(base + bonus);
+    return Math.round(this.scoreAcc + bonus);
   }
 
   private finish(now: number, timeRemaining: number): void {
     this.finished = true;
     this.status = "finished";
     this.finishedAt = now;
-    this.score = this.computeScore(timeRemaining);
+    this.score = this.finalizeScore(timeRemaining);
     this.emit(now, 0);
     this.stopTimer();
   }
@@ -143,6 +158,7 @@ export class GameSession {
       speed: Math.round(this.speed),
       distance: Math.round(this.distance),
       score: this.score,
+      multiplier: Math.round(this.multiplier * 10) / 10,
       timeRemaining: Math.round(timeRemaining),
       finished: this.finished,
     };
