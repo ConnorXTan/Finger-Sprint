@@ -1,5 +1,6 @@
 import type { StateMessage } from "@finger-sprint/shared";
 import type { Landmark } from "../game/movementIntensity";
+import type { LegPose } from "../game/fingerLegs";
 
 /**
  * Pure canvas drawing. Given the latest authoritative state, paint one frame:
@@ -14,6 +15,11 @@ export interface RenderInput {
   state: StateMessage | null;
   /** Local smoothed intensity (for the little effort gauge / dust intensity). */
   intensity: number;
+  /**
+   * Per-leg swing driven directly by the index + middle fingers, or null when
+   * no hand is tracked (the runner then falls back to a time-based idle jog).
+   */
+  legPose: LegPose | null;
   trackLength: number;
   /** performance.now() — drives idle animation independent of game speed. */
   nowMs: number;
@@ -29,7 +35,7 @@ export function renderGame(
   height: number,
   input: RenderInput,
 ): void {
-  const { state, intensity, trackLength, nowMs } = input;
+  const { state, intensity, legPose, trackLength, nowMs } = input;
   const distance = state?.distance ?? 0;
   const speed = state?.speed ?? 0;
   const position = state?.position ?? 0;
@@ -41,7 +47,7 @@ export function renderGame(
   drawHills(ctx, width, groundY, distance);
   drawGround(ctx, width, height, groundY, distance);
   drawFinishLine(ctx, runnerX, groundY, distance, trackLength);
-  drawRunner(ctx, runnerX, groundY, speed, intensity, nowMs);
+  drawRunner(ctx, runnerX, groundY, speed, intensity, nowMs, legPose);
   drawProgressBar(ctx, width, position);
 }
 
@@ -142,11 +148,26 @@ function drawRunner(
   speed: number,
   intensity: number,
   nowMs: number,
+  legPose: LegPose | null,
 ): void {
-  // Stride frequency grows with speed; there's always a gentle idle bob.
-  const stride = (nowMs / 1000) * (3 + speed * 0.03);
-  const swing = Math.sin(stride);
-  const bob = Math.abs(Math.cos(stride)) * Math.min(8, 2 + speed * 0.02);
+  // Each leg's swing. When a hand is tracked, the legs are puppeted directly by
+  // the index + middle fingers (index -> front leg, middle -> back leg) so the
+  // cartoon mirrors your real fingers. Otherwise fall back to a time-based jog.
+  let legFront: number;
+  let legBack: number;
+  let bob: number;
+  if (legPose) {
+    legFront = legPose.index;
+    legBack = legPose.middle;
+    // Bounce with how much the fingers are actually moving.
+    bob = Math.min(9, (Math.abs(legFront) + Math.abs(legBack)) * 4.5);
+  } else {
+    // Stride frequency grows with speed; there's always a gentle idle bob.
+    const stride = (nowMs / 1000) * (3 + speed * 0.03);
+    legFront = Math.sin(stride);
+    legBack = -legFront;
+    bob = Math.abs(Math.cos(stride)) * Math.min(8, 2 + speed * 0.02);
+  }
   const baseY = groundY - 44 - bob;
 
   // Speed "whoosh" lines behind the runner.
@@ -178,17 +199,17 @@ function drawRunner(
   ctx.save();
   ctx.translate(x, baseY);
 
-  // Back leg + front leg (swing in opposition).
+  // Two legs, each following its own finger.
   ctx.strokeStyle = "#1b1b1b";
   ctx.lineWidth = 6;
   ctx.lineCap = "round";
-  leg(ctx, swing);
-  leg(ctx, -swing);
+  leg(ctx, legBack);
+  leg(ctx, legFront);
 
-  // Arms
+  // Arms counter-swing against the legs for a natural gait.
   ctx.lineWidth = 5;
-  arm(ctx, -swing);
-  arm(ctx, swing);
+  arm(ctx, -legBack);
+  arm(ctx, -legFront);
 
   // Body
   ctx.fillStyle = "#ff5a5f";
@@ -286,29 +307,46 @@ export function drawHandOverlay(
   const mx = (x: number) => (1 - x) * width; // mirror horizontally
   const my = (y: number) => y * height;
 
-  // Bones connecting the standard MediaPipe hand skeleton.
-  const BONES: [number, number][] = [
+  // The two fingers that actually control the runner (the "legs").
+  const LEG_BONES: [number, number][] = [
+    [5, 6], [6, 7], [7, 8], // index
+    [9, 10], [10, 11], [11, 12], // middle
+  ];
+  const LEG_TIPS = new Set([8, 12]);
+
+  // The rest of the standard MediaPipe hand skeleton (drawn dim — inactive).
+  const OTHER_BONES: [number, number][] = [
     [0, 1], [1, 2], [2, 3], [3, 4],
-    [0, 5], [5, 6], [6, 7], [7, 8],
-    [5, 9], [9, 10], [10, 11], [11, 12],
-    [9, 13], [13, 14], [14, 15], [15, 16],
+    [0, 5], [5, 9], [9, 13], [13, 14], [14, 15], [15, 16],
     [13, 17], [17, 18], [18, 19], [19, 20],
     [0, 17],
   ];
 
-  ctx.strokeStyle = "rgba(120,220,255,0.9)";
+  // Dim, inactive skeleton.
+  ctx.strokeStyle = "rgba(120,180,210,0.35)";
   ctx.lineWidth = 2;
-  for (const [a, b] of BONES) {
+  for (const [a, b] of OTHER_BONES) {
     ctx.beginPath();
     ctx.moveTo(mx(landmarks[a].x), my(landmarks[a].y));
     ctx.lineTo(mx(landmarks[b].x), my(landmarks[b].y));
     ctx.stroke();
   }
 
-  ctx.fillStyle = "#ffd43b";
-  for (const lm of landmarks) {
+  // Bright, active "legs": index + middle fingers.
+  ctx.strokeStyle = "rgba(120,255,160,0.95)";
+  ctx.lineWidth = 4;
+  for (const [a, b] of LEG_BONES) {
     ctx.beginPath();
-    ctx.arc(mx(lm.x), my(lm.y), 3, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(mx(landmarks[a].x), my(landmarks[a].y));
+    ctx.lineTo(mx(landmarks[b].x), my(landmarks[b].y));
+    ctx.stroke();
   }
+
+  landmarks.forEach((lm, i) => {
+    const isTip = LEG_TIPS.has(i);
+    ctx.fillStyle = isTip ? "#9dff9d" : "rgba(255,212,59,0.45)";
+    ctx.beginPath();
+    ctx.arc(mx(lm.x), my(lm.y), isTip ? 5 : 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
 }

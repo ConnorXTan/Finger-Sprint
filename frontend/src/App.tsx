@@ -150,6 +150,7 @@ function PlayScreen({ engine }: { engine: FingerSprintEngine }) {
         <GameView
           gameStateRef={engine.gameStateRef}
           intensityRef={engine.intensityRef}
+          legPoseRef={engine.legPoseRef}
           trackLength={trackLength}
         />
         <Hud state={engine.gameState} intensity={engine.intensity} trackLength={trackLength} />

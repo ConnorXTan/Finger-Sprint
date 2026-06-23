@@ -1,5 +1,6 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import type { StateMessage } from "@finger-sprint/shared";
+import type { LegPose } from "../game/fingerLegs";
 import { renderGame } from "../render/renderGame";
 
 const CANVAS_W = 960;
@@ -13,10 +14,12 @@ const CANVAS_H = 540;
 export function GameView({
   gameStateRef,
   intensityRef,
+  legPoseRef,
   trackLength,
 }: {
   gameStateRef: MutableRefObject<StateMessage | null>;
   intensityRef: MutableRefObject<number>;
+  legPoseRef: MutableRefObject<LegPose | null>;
   trackLength: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -30,6 +33,7 @@ export function GameView({
         renderGame(ctx, canvas.width, canvas.height, {
           state: gameStateRef.current,
           intensity: intensityRef.current,
+          legPose: legPoseRef.current,
           trackLength,
           nowMs: t,
         });
@@ -38,7 +42,7 @@ export function GameView({
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [gameStateRef, intensityRef, trackLength]);
+  }, [gameStateRef, intensityRef, legPoseRef, trackLength]);
 
   return <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} className="game-canvas" />;
 }

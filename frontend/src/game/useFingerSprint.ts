@@ -7,6 +7,7 @@ import type {
 import { MOVEMENT_TICK_MS } from "../config";
 import { createHandTracker, type HandTracker } from "./handTracker";
 import { MovementIntensity, type Landmark } from "./movementIntensity";
+import { FingerLegTracker, type LegPose } from "./fingerLegs";
 import { useWebcam } from "./useWebcam";
 import { createSession, endSession, GameConnection, submitScore } from "../net/gameClient";
 
@@ -45,11 +46,13 @@ export function useFingerSprint() {
   // Per-frame data for the renderer (no re-render on update).
   const intensityRef = useRef(0);
   const landmarksRef = useRef<Landmark[] | null>(null);
+  const legPoseRef = useRef<LegPose | null>(null);
   const gameStateRef = useRef<StateMessage | null>(null);
 
   // Long-lived engine pieces.
   const trackerRef = useRef<HandTracker | null>(null);
   const metricRef = useRef(new MovementIntensity());
+  const legTrackerRef = useRef(new FingerLegTracker());
   const connectionRef = useRef<GameConnection | null>(null);
 
   // Loop handles.
@@ -67,6 +70,7 @@ export function useFingerSprint() {
           const { landmarks } = tracker.detect(video, timeMs);
           landmarksRef.current = landmarks;
           intensityRef.current = metricRef.current.update(landmarks, timeMs);
+          legPoseRef.current = legTrackerRef.current.update(landmarks);
         } catch {
           // A transient detect error shouldn't kill the loop.
         }
@@ -103,6 +107,7 @@ export function useFingerSprint() {
       return;
     }
     metricRef.current.reset();
+    legTrackerRef.current.reset();
     runTrackingLoop();
     runSendLoop();
     setPhase("ready");
@@ -132,6 +137,7 @@ export function useFingerSprint() {
     gameStateRef.current = null;
     finishingRef.current = false;
     metricRef.current.reset();
+    legTrackerRef.current.reset();
     try {
       const created = await createSession();
       setSession(created);
@@ -166,6 +172,7 @@ export function useFingerSprint() {
     gameStateRef.current = null;
     finishingRef.current = false;
     metricRef.current.reset();
+    legTrackerRef.current.reset();
     setPhase("ready");
   }, []);
 
@@ -200,6 +207,7 @@ export function useFingerSprint() {
     videoRef,
     intensityRef,
     landmarksRef,
+    legPoseRef,
     gameStateRef,
   };
 }
