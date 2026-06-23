@@ -6,8 +6,9 @@ import type {
 } from "@finger-sprint/shared";
 import { MOVEMENT_TICK_MS } from "../config";
 import { createHandTracker, type HandTracker } from "./handTracker";
-import { MovementIntensity, type Landmark } from "./movementIntensity";
+import type { Landmark } from "./movementIntensity";
 import { FingerLegTracker, type LegPose } from "./fingerLegs";
+import { StepCounter } from "./stepCounter";
 import { useWebcam } from "./useWebcam";
 import { createSession, endSession, GameConnection, submitScore } from "../net/gameClient";
 
@@ -38,6 +39,8 @@ export function useFingerSprint() {
   const [phase, setPhase] = useState<GamePhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [intensity, setIntensity] = useState(0);
+  const [steps, setSteps] = useState(0);
+  const [stepsPerMinute, setStepsPerMinute] = useState(0);
   const [handDetected, setHandDetected] = useState(false);
   const [gameState, setGameState] = useState<StateMessage | null>(null);
   const [session, setSession] = useState<CreateSessionResponse | null>(null);
@@ -45,14 +48,16 @@ export function useFingerSprint() {
 
   // Per-frame data for the renderer (no re-render on update).
   const intensityRef = useRef(0);
+  const stepsRef = useRef(0);
+  const cadenceRef = useRef(0); // smoothed steps per second
   const landmarksRef = useRef<Landmark[] | null>(null);
   const legPoseRef = useRef<LegPose | null>(null);
   const gameStateRef = useRef<StateMessage | null>(null);
 
   // Long-lived engine pieces.
   const trackerRef = useRef<HandTracker | null>(null);
-  const metricRef = useRef(new MovementIntensity());
   const legTrackerRef = useRef(new FingerLegTracker());
+  const stepCounterRef = useRef(new StepCounter());
   const connectionRef = useRef<GameConnection | null>(null);
 
   // Loop handles.
@@ -69,8 +74,13 @@ export function useFingerSprint() {
         try {
           const { landmarks } = tracker.detect(video, timeMs);
           landmarksRef.current = landmarks;
-          intensityRef.current = metricRef.current.update(landmarks, timeMs);
-          legPoseRef.current = legTrackerRef.current.update(landmarks);
+          // Index/middle finger swing drives both the runner's legs and the
+          // step detector; the step cadence is the movement value we send.
+          const legPose = legTrackerRef.current.update(landmarks);
+          legPoseRef.current = legPose;
+          intensityRef.current = stepCounterRef.current.update(legPose, timeMs);
+          stepsRef.current = stepCounterRef.current.totalSteps;
+          cadenceRef.current = stepCounterRef.current.stepsPerSecond;
         } catch {
           // A transient detect error shouldn't kill the loop.
         }
@@ -85,6 +95,8 @@ export function useFingerSprint() {
     sendTimerRef.current = setInterval(() => {
       const value = intensityRef.current;
       setIntensity(value);
+      setSteps(stepsRef.current);
+      setStepsPerMinute(Math.round(cadenceRef.current * 60));
       setHandDetected(landmarksRef.current != null);
       connectionRef.current?.sendMovement(value);
     }, MOVEMENT_TICK_MS);
@@ -106,8 +118,8 @@ export function useFingerSprint() {
       setPhase("error");
       return;
     }
-    metricRef.current.reset();
     legTrackerRef.current.reset();
+    stepCounterRef.current.reset();
     runTrackingLoop();
     runSendLoop();
     setPhase("ready");
@@ -136,8 +148,8 @@ export function useFingerSprint() {
     setGameState(null);
     gameStateRef.current = null;
     finishingRef.current = false;
-    metricRef.current.reset();
     legTrackerRef.current.reset();
+    stepCounterRef.current.reset();
     try {
       const created = await createSession();
       setSession(created);
@@ -171,8 +183,8 @@ export function useFingerSprint() {
     setGameState(null);
     gameStateRef.current = null;
     finishingRef.current = false;
-    metricRef.current.reset();
     legTrackerRef.current.reset();
+    stepCounterRef.current.reset();
     setPhase("ready");
   }, []);
 
@@ -196,6 +208,8 @@ export function useFingerSprint() {
     playAgain,
     // data for the UI
     intensity,
+    steps,
+    stepsPerMinute,
     handDetected,
     gameState,
     session,
