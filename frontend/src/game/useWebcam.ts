@@ -6,12 +6,41 @@ export type WebcamStatus =
   | "ready"
   | "denied"
   | "notfound"
+  | "busy"
   | "unsupported"
   | "error";
 
 /**
+ * Map a getUserMedia rejection to a user-presentable status. Covers every
+ * DOMException name browsers actually throw; anything unknown falls through to
+ * "error" so the raw message can be shown.
+ */
+export function statusForGetUserMediaError(e: unknown): WebcamStatus {
+  switch ((e as DOMException)?.name) {
+    case "NotAllowedError":
+    case "SecurityError":
+    case "PermissionDeniedError":
+      return "denied";
+    case "NotFoundError":
+    case "DevicesNotFoundError":
+    case "OverconstrainedError":
+      return "notfound";
+    case "NotReadableError":
+    case "TrackStartError":
+    case "AbortError":
+      return "busy"; // camera exists but the OS/another app is holding it
+    case "NotSupportedError":
+    case "TypeError": // insecure context: mediaDevices exists but gUM rejects
+      return "unsupported";
+    default:
+      return "error";
+  }
+}
+
+/**
  * Webcam capture via getUserMedia, with explicit, user-presentable states for
- * the things that go wrong: API unsupported, permission denied, no camera.
+ * the things that go wrong: API unsupported, permission denied, no camera,
+ * camera busy.
  */
 export function useWebcam() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -44,15 +73,9 @@ export function useWebcam() {
       setStatus("ready");
       return true;
     } catch (e) {
-      const err = e as DOMException;
-      if (err?.name === "NotAllowedError" || err?.name === "SecurityError") {
-        setStatus("denied");
-      } else if (err?.name === "NotFoundError" || err?.name === "OverconstrainedError") {
-        setStatus("notfound");
-      } else {
-        setStatus("error");
-        setError(err?.message ?? String(e));
-      }
+      const mapped = statusForGetUserMediaError(e);
+      setStatus(mapped);
+      if (mapped === "error") setError((e as DOMException)?.message ?? String(e));
       return false;
     }
   }, []);

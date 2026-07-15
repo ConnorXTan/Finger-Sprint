@@ -260,6 +260,11 @@ function describeError(
         title: "No camera found",
         body: "We couldn’t find a webcam. Plug one in (or enable it) and try again.",
       };
+    case "busy":
+      return {
+        title: "Camera unavailable",
+        body: "Your camera appears to be in use by another app or blocked by the operating system. Close anything else using the camera and try again.",
+      };
     case "unsupported":
       return {
         title: "Webcam not supported",
