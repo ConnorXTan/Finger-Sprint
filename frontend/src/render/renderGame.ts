@@ -1,5 +1,5 @@
 import type { StateMessage } from "@finger-sprint/shared";
-import type { Landmark } from "../game/movementIntensity";
+import type { Landmark } from "../game/handTracker";
 import type { LegPose } from "../game/fingerLegs";
 
 /**
@@ -13,8 +13,6 @@ import type { LegPose } from "../game/fingerLegs";
 
 export interface RenderInput {
   state: StateMessage | null;
-  /** Local smoothed intensity (for the little effort gauge / dust intensity). */
-  intensity: number;
   /**
    * Per-leg swing driven directly by the index + middle fingers, or null when
    * no hand is tracked (the runner then falls back to a time-based idle jog).
@@ -35,7 +33,7 @@ export function renderGame(
   height: number,
   input: RenderInput,
 ): void {
-  const { state, intensity, legPose, trackLength, nowMs } = input;
+  const { state, legPose, trackLength, nowMs } = input;
   const distance = state?.distance ?? 0;
   const speed = state?.speed ?? 0;
   const position = state?.position ?? 0;
@@ -47,7 +45,7 @@ export function renderGame(
   drawHills(ctx, width, groundY, distance);
   drawGround(ctx, width, height, groundY, distance);
   drawFinishLine(ctx, runnerX, groundY, distance, trackLength);
-  drawRunner(ctx, runnerX, groundY, speed, intensity, nowMs, legPose);
+  drawRunner(ctx, runnerX, groundY, speed, nowMs, legPose);
   drawProgressBar(ctx, width, position);
 }
 
@@ -146,7 +144,6 @@ function drawRunner(
   x: number,
   groundY: number,
   speed: number,
-  intensity: number,
   nowMs: number,
   legPose: LegPose | null,
 ): void {
@@ -185,8 +182,8 @@ function drawRunner(
     }
   }
 
-  // Kicked-up dust, scaled by current effort.
-  const dustCount = Math.min(10, Math.floor(intensity / 8));
+  // Kicked-up dust, scaled by the current stepping pace.
+  const dustCount = Math.min(10, Math.floor(speed / 45));
   ctx.fillStyle = "rgba(220,210,180,0.5)";
   for (let i = 0; i < dustCount; i++) {
     const px = x - 20 - ((nowMs / 4 + i * 37) % 60);

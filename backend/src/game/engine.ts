@@ -6,9 +6,9 @@ const G = config.game;
 export type SessionStatus = "created" | "running" | "finished";
 
 /**
- * One authoritative game session. The server — not the client — owns speed,
- * distance and score. The client only feeds in a movement-intensity number; the
- * physics loop here decides what actually happens.
+ * One authoritative game session. The server — not the client — owns steps,
+ * distance and score. The client only reports its flat step count (fingertip
+ * crossings); every accepted step advances the runner exactly one stride.
  */
 export class GameSession {
   readonly id: string;
@@ -17,10 +17,13 @@ export class GameSession {
   finishedAt = 0;
 
   // Authoritative state.
+  /** Display pace (units/sec) derived from stepping — cosmetic, not physics. */
   speed = 0;
   distance = 0;
   score = 0;
   multiplier = 1;
+  /** Total steps accepted this round. */
+  steps = 0;
   finished = false;
 
   /** Running, banked score (distance covered each tick × the live multiplier). */
@@ -29,8 +32,10 @@ export class GameSession {
   // Internal clock / input bookkeeping.
   private startTime = 0;
   private lastTickTime = 0;
-  private intensity = 0;
-  private lastMovementTime = 0;
+  /** Last cumulative step total reported by the client. */
+  private lastClientTotal = 0;
+  /** Steps reported since the last tick, waiting to be applied. */
+  private pendingSteps = 0;
 
   private timer: ReturnType<typeof setInterval> | null = null;
   private onState: ((s: StateMessage) => void) | null = null;
@@ -50,16 +55,21 @@ export class GameSession {
       this.status = "running";
       this.startTime = now;
       this.lastTickTime = now;
-      this.lastMovementTime = now;
       this.timer = setInterval(() => this.tick(Date.now()), G.tickMs);
     }
     this.emit(now);
   }
 
-  /** Record the latest client movement intensity (clamped for sanity). */
-  applyMovement(intensity: number, now: number): void {
-    this.intensity = Math.max(0, Math.min(G.maxIntensity, intensity));
-    this.lastMovementTime = now;
+  /**
+   * Record the client's cumulative step total. Advancing by the delta between
+   * successive totals makes lost/duplicated messages self-healing; negative
+   * deltas (out-of-order frames) are ignored.
+   */
+  applySteps(clientTotalSteps: number): void {
+    const total = Math.max(0, Math.floor(clientTotalSteps));
+    const delta = total - this.lastClientTotal;
+    this.lastClientTotal = total;
+    if (delta > 0) this.pendingSteps += delta;
   }
 
   private tick(now: number): void {
@@ -67,22 +77,22 @@ export class GameSession {
     const dt = Math.max(0, (now - this.lastTickTime) / 1000);
     this.lastTickTime = now;
 
-    // Drop intensity to 0 if the client has gone quiet (disconnect / stopped).
-    const stale = now - this.lastMovementTime > G.staleMs;
-    const effectiveIntensity = stale ? 0 : this.intensity;
+    // Flat step accounting: each accepted step is exactly one stride. The only
+    // adjustment is a rate cap far above human finger speed (anti-cheat) —
+    // excess is dropped, never banked.
+    const cap = Math.ceil(G.maxStepsPerSecond * dt);
+    const stepsThisTick = Math.min(this.pendingSteps, cap);
+    this.pendingSteps = 0;
+    this.steps += stepsThisTick;
 
-    // Acceleration curve: ease the current speed toward a target derived from
-    // intensity, with separate ramp-up / ramp-down rates. This gives momentum —
-    // a flick of the fingers doesn't instantly teleport the runner.
-    const targetSpeed = Math.min(G.maxSpeed, effectiveIntensity * G.intensityToSpeed);
-    if (targetSpeed > this.speed) {
-      this.speed = Math.min(targetSpeed, this.speed + G.accelPerSec * dt);
-    } else {
-      this.speed = Math.max(targetSpeed, this.speed - G.decelPerSec * dt);
-    }
-
-    const distanceGained = this.speed * dt;
+    const distanceGained = stepsThisTick * G.distancePerStep;
     this.distance += distanceGained;
+
+    // Display pace, eased so the runner animation doesn't stutter between
+    // ticks. Cosmetic only — distance/score never derive from it.
+    const instSpeed = dt > 0 ? distanceGained / dt : 0;
+    this.speed += G.speedEmaAlpha * (instSpeed - this.speed);
+    if (stepsThisTick === 0 && this.speed < 1) this.speed = 0;
 
     // Sustained-effort combo: builds while the runner is fast, bleeds away (and
     // faster than it builds) once you slow down — so you have to keep going.
@@ -157,6 +167,7 @@ export class GameSession {
       position: Math.min(1, this.distance / G.trackLength),
       speed: Math.round(this.speed),
       distance: Math.round(this.distance),
+      steps: this.steps,
       score: this.score,
       multiplier: Math.round(this.multiplier * 10) / 10,
       timeRemaining: Math.round(timeRemaining),

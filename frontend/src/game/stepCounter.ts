@@ -1,140 +1,93 @@
 /**
  * ============================================================================
- *  STEP COUNTER   (turns the two fingers "walking" into a running cadence)
+ *  STEP COUNTER   (flat count of genuine fingertip crossings)
  * ============================================================================
  *
- * Instead of measuring raw finger velocity, this detects actual *steps*: in a
- * walking motion the index and middle fingers alternate which one is in front.
- * Every time the front finger swaps (the fingertips pass each other) we count
- * one step — exactly like planting alternate feet.
+ * A "step" has exactly one definition: the POINTER/INDEX fingertip (landmark 8)
+ * and the MIDDLE fingertip (landmark 12) physically pass each other. We compare
+ * the two tips' RAW reach along the hand axis (`indexReach` / `middleReach`
+ * from fingerLegs.ts — no baselines, no smoothing):
  *
- * The "who's in front" signal is the difference between the two legs' swing
- * (from `fingerLegs.ts`): both swings are already baseline-centered and
- * hand-relative, so:
- *   s > 0  -> index finger leads
- *   s < 0  -> middle finger leads
- *   s = 0  -> fingers level / passing each other  (a step happens here)
- * Because it's built on the hand-local frame, moving / rotating / zooming the
- * whole hand can't fake a step — you have to genuinely alternate the fingers.
+ *   gap = indexReach - middleReach
+ *     gap > +crossMargin  ->  pointer tip is clearly in front
+ *     gap < -crossMargin  ->  middle tip is clearly in front
+ *     otherwise           ->  neutral zone: tips are level, nothing counts
  *
- * Output (`value`) is a smoothed cadence — steps per second scaled into the
- * same range the server expects for "movement intensity" — so faster, steadier
- * stepping makes the runner sprint, and stopping lets it coast to a halt.
+ * A step is registered ONLY when the leading tip flips from one finger to the
+ * other — i.e. the tips crossed AND cleared the margin on the far side. The
+ * ±crossMargin band is the "clear boundary": wiggling one finger up and down
+ * without its tip actually passing the other tip never flips the leader, so it
+ * can never count as steps. Whole-hand motion can't either, because reach is
+ * measured in the hand-local frame.
+ *
+ * The output is the FLAT total number of steps this round — no cadence, no
+ * rates, no decay. One crossing = one step, always.
  */
 
 import type { LegPose } from "./fingerLegs";
 
 export interface StepTuning {
   /**
-   * How decisively a finger must lead before it counts as "in front". Creates
-   * a dead-band around the crossover so tiny jitter near level doesn't spam
-   * steps (hysteresis). In leg-swing units (see fingerLegs.ts, ~±1.3).
+   * How far past the other tip a fingertip must reach (in hand-scale units,
+   * i.e. fractions of the wrist->knuckle distance) before it counts as clearly
+   * in front. This dead-band around the crossover is the boundary between "the
+   * pointer leads" and "the middle leads"; tracker jitter inside it is ignored.
    */
-  leadThreshold: number;
-  /** Maps cadence (steps/sec) into the server's movement-value range. */
-  cadenceScale: number;
-  /** Smoothing for the cadence estimate (0..1, higher = snappier). */
-  emaAlpha: number;
-  /** Cadence seeded on the very first step so you get instant feedback. */
-  seedCadence: number;
-  /** Ignore implied rates above this (steps/sec) to reject double-trigger spikes. */
-  maxRate: number;
-  /** Once stepping pauses this long (ms), cadence starts decaying toward 0. */
-  idleMs: number;
-  /** How fast cadence bleeds away per second once you've stopped stepping. */
-  idleDecayPerSec: number;
+  crossMargin: number;
+  /** Minimum ms between counted steps — rejects single-frame tracker flicker. */
+  minStepIntervalMs: number;
 }
 
 export const DEFAULT_STEP_TUNING: StepTuning = {
-  leadThreshold: 0.18,
-  cadenceScale: 22,
-  emaAlpha: 0.35,
-  seedCadence: 2,
-  maxRate: 10,
-  idleMs: 250,
-  idleDecayPerSec: 2,
+  crossMargin: 0.06,
+  minStepIntervalMs: 80,
 };
 
 export class StepCounter {
-  /** Which finger is currently in front: +1 index, -1 middle, 0 unknown. */
-  private front = 0;
+  /** Which tip clearly leads: +1 pointer/index, -1 middle, 0 unknown/level. */
+  private leader = 0;
   private steps = 0;
-  private cadence = 0; // steps per second (smoothed)
   private lastStepMs = 0;
-  private prevMs = 0;
 
   constructor(private readonly tuning: StepTuning = DEFAULT_STEP_TUNING) {}
 
-  /** Smoothed movement value to send to the server / show on the HUD. */
-  get value(): number {
-    return this.cadence * this.tuning.cadenceScale;
-  }
-
-  /** Total steps taken this round. */
+  /** Flat total steps this round (the only output — there is no rate). */
   get totalSteps(): number {
     return this.steps;
   }
 
-  /** Current smoothed cadence in steps per second. */
-  get stepsPerSecond(): number {
-    return this.cadence;
-  }
-
   /** Clear all history — call when (re)starting a round. */
   reset(): void {
-    this.front = 0;
+    this.leader = 0;
     this.steps = 0;
-    this.cadence = 0;
     this.lastStepMs = 0;
-    this.prevMs = 0;
   }
 
   /**
-   * Feed one frame's leg pose. Pass `null` when no hand is detected — the
-   * cadence then decays toward 0 so the runner coasts to a stop. Returns the
-   * current movement value (same as `value`).
+   * Feed one frame's leg pose (`null` when no hand is detected). Returns the
+   * flat total step count.
    */
   update(legPose: LegPose | null, timeMs: number): number {
-    const dt = this.prevMs ? timeMs - this.prevMs : 0;
-    this.prevMs = timeMs;
-
-    if (legPose) {
-      const s = legPose.index - legPose.middle; // >0 index leads, <0 middle leads
-      if (s > this.tuning.leadThreshold && this.front <= 0) {
-        if (this.front < 0) this.registerStep(timeMs); // genuine front<->back swap
-        this.front = 1;
-      } else if (s < -this.tuning.leadThreshold && this.front >= 0) {
-        if (this.front > 0) this.registerStep(timeMs);
-        this.front = -1;
-      }
-    } else {
-      this.front = 0; // re-baseline cleanly when the hand reappears
+    if (!legPose) {
+      this.leader = 0; // re-acquire the leader cleanly when the hand returns
+      return this.steps;
     }
 
-    // Bleed cadence away only once stepping has clearly paused, so a steady
-    // walk holds a stable speed instead of sawtoothing between steps.
-    if (dt > 0 && this.cadence > 0) {
-      const sinceStep = this.lastStepMs ? timeMs - this.lastStepMs : Infinity;
-      const expectedInterval = 1000 / Math.max(this.cadence, 0.001);
-      if (sinceStep > Math.max(this.tuning.idleMs, 1.6 * expectedInterval)) {
-        this.cadence *= Math.exp(-this.tuning.idleDecayPerSec * (dt / 1000));
+    const gap = legPose.indexReach - legPose.middleReach;
+    if (Math.abs(gap) < this.tuning.crossMargin) return this.steps; // tips level
+
+    const leader = gap > 0 ? 1 : -1;
+    if (this.leader === 0) {
+      // First clear leader after (re)start or hand loss — a position, not a step.
+      this.leader = leader;
+    } else if (leader !== this.leader) {
+      // The tips genuinely crossed and cleared the margin on the other side.
+      this.leader = leader;
+      if (!this.lastStepMs || timeMs - this.lastStepMs >= this.tuning.minStepIntervalMs) {
+        this.steps++;
+        this.lastStepMs = timeMs;
       }
     }
-
-    return this.value;
-  }
-
-  private registerStep(timeMs: number): void {
-    this.steps++;
-    if (this.lastStepMs) {
-      const interval = (timeMs - this.lastStepMs) / 1000;
-      if (interval > 0) {
-        const inst = Math.min(this.tuning.maxRate, 1 / interval);
-        this.cadence += this.tuning.emaAlpha * (inst - this.cadence);
-      }
-    } else {
-      this.cadence = Math.max(this.cadence, this.tuning.seedCadence);
-    }
-    this.lastStepMs = timeMs;
+    return this.steps;
   }
 }

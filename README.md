@@ -1,9 +1,10 @@
 # 🏃✋ Finger Sprint
 
-A webcam finger-speed running game. Wiggle your fingers in front of the camera as
-fast as you can — faster finger motion makes an on-screen character sprint. Cover
-the most distance (or reach the finish line) before the timer runs out, then put
-your name on the leaderboard.
+A webcam finger-walking running game. "Walk" your index and middle fingers in
+front of the camera like two little legs — every time the two fingertips cross
+each other counts as one step, and every step moves your runner one fixed
+stride. Rack up the most steps (or reach the finish line) before the timer runs
+out, then put your name on the leaderboard.
 
 Inspired by viral gesture-counting hand challenges. All hand tracking runs **in
 your browser** — video frames never leave your device.
@@ -30,15 +31,15 @@ finger-sprint/
 | --- | --- | --- |
 | Webcam capture (`getUserMedia`) | ✅ | — |
 | Hand tracking (MediaPipe, client-side) | ✅ | — |
-| Movement-intensity metric | ✅ computes & smooths | — |
-| Game physics (speed, distance, decay) | — | ✅ authoritative |
+| Step counting (fingertip crossings) | ✅ detects & counts | — |
+| Steps → distance & scoring | — | ✅ authoritative |
 | Scoring & validation | — | ✅ single source of truth |
 | Rendering (character, meters, timer) | ✅ visualizes server state | — |
 | Leaderboard persistence | — | ✅ SQLite |
 
-The frontend is deliberately **"dumb" about scoring**: it sends a movement metric
-and renders whatever state the server says is true. Scores are computed and
-clamped server-side so they can't be trivially faked from the client.
+The frontend is deliberately **"dumb" about scoring**: it reports its flat step
+count and renders whatever state the server says is true. Scores are computed
+and rate-capped server-side so they can't be trivially faked from the client.
 
 ---
 
@@ -48,21 +49,21 @@ clamped server-side so they can't be trivially faked from the client.
  Webcam ─▶ MediaPipe Hands ─▶ 21 landmarks/frame
                                    │
                                    ▼
-                    movementIntensity.ts  (velocity of fingertips,
-                    normalized by hand size, exponentially smoothed)
+             fingerLegs.ts + stepCounter.ts  (raw index/middle tip
+             positions in the hand frame; +1 step per genuine crossing)
                                    │  every ~100ms (NOT every frame)
                                    ▼
-        WebSocket  { type:"movement", sessionId, intensity, timestamp }
-                                   │
+        WebSocket  { type:"movement", sessionId, steps, timestamp }
+                                   │  (steps = flat cumulative total)
                                    ▼
-   ┌──────────────────────── BACKEND ────────────────────────┐
-   │  game loop @100ms: intensity → target speed → accel/decay │
-   │  → distance += speed·dt → score → win/lose checks         │
-   └──────────────────────────────────────────────────────────┘
+   ┌──────────────────────── BACKEND ─────────────────────────┐
+   │  game loop @100ms: accepted steps (rate-capped) → distance │
+   │  += steps · stride → score → win/lose checks               │
+   └────────────────────────────────────────────────────────────┘
                                    │  every tick
                                    ▼
         WebSocket  { type:"state", position, speed, distance,
-                     score, timeRemaining, finished }
+                     steps, score, timeRemaining, finished }
                                    │
                                    ▼
               Canvas renderer  (runner, parallax, finish line, HUD)
@@ -122,10 +123,10 @@ Backend (all optional — see [`backend/.env.example`](backend/.env.example)):
 | `PORT` | `4000` | HTTP + WebSocket port |
 | `DB_PATH` | `./data/leaderboard.db` | SQLite file (auto-created) |
 
-Game tuning (round length, speed curve, scoring) lives in
-[`backend/src/config.ts`](backend/src/config.ts). The movement-intensity
-sensitivity lives in
-[`frontend/src/game/movementIntensity.ts`](frontend/src/game/movementIntensity.ts)
+Game tuning (round length, stride distance, scoring) lives in
+[`backend/src/config.ts`](backend/src/config.ts). Step-detection sensitivity
+(the crossing margin) lives in
+[`frontend/src/game/stepCounter.ts`](frontend/src/game/stepCounter.ts)
 — both are isolated and commented for easy tweaking.
 
 ---
@@ -201,10 +202,12 @@ session — the client can't supply it).
 Open one socket per session (pass the id as a query param). The server starts the
 authoritative clock on connect and streams state until the round is `finished`.
 
-**client → server** (send on a fixed ~100ms tick, *not* every frame):
+**client → server** (send on a fixed ~100ms tick, *not* every frame). `steps`
+is the flat, cumulative total of fingertip crossings this round — a count, not
+a rate — so lost or reordered messages self-heal via the delta:
 
 ```jsonc
-{ "type": "movement", "sessionId": "uuid", "intensity": 73.4, "timestamp": 1700000000000 }
+{ "type": "movement", "sessionId": "uuid", "steps": 42, "timestamp": 1700000000000 }
 ```
 
 **server → client** (one per game tick):
@@ -213,8 +216,9 @@ authoritative clock on connect and streams state until the round is `finished`.
 {
   "type": "state",
   "position": 0.42,        // 0..1 progress along the track
-  "speed": 410,            // current speed (units/s)
-  "distance": 7560,        // distance covered
+  "speed": 210,            // display pace derived from stepping (units/s)
+  "distance": 7560,        // distance covered (steps × stride)
+  "steps": 108,            // total steps the server has accepted
   "score": 14820,          // banked, combo-weighted score
   "multiplier": 2.3,       // live sustained-effort combo (>= 1)
   "timeRemaining": 52400,  // ms left
@@ -227,20 +231,26 @@ session). Malformed frames are ignored.
 
 ---
 
-## How the movement metric works
+## How step counting works
 
-Per video frame, [`movementIntensity.ts`](frontend/src/game/movementIntensity.ts):
+A step has exactly one definition: **the pointer/index fingertip (MediaPipe
+landmark 8) and the middle fingertip (landmark 12) physically pass each other.**
+Per video frame, [`fingerLegs.ts`](frontend/src/game/fingerLegs.ts) +
+[`stepCounter.ts`](frontend/src/game/stepCounter.ts):
 
-1. Looks at the **five fingertips** (landmarks 4, 8, 12, 16, 20).
-2. Measures how far they moved since the previous frame.
-3. **Normalizes by hand size** (wrist → middle-knuckle distance), so being close
-   to or far from the camera doesn't change the metric.
-4. Divides by elapsed time → a **velocity** (independent of webcam frame rate).
-5. **Exponentially smooths** the result so it doesn't jitter.
+1. Project both fingertips onto the **hand axis** (wrist → middle knuckle),
+   normalized by hand size — so moving, rotating, or zooming the whole hand
+   changes nothing; only real finger motion does.
+2. Compare the two **raw** tip positions: whichever reaches further is "in
+   front". A tip only counts as clearly in front once it's past the other by a
+   margin (`crossMargin`) — the clear boundary between "pointer leads" and
+   "middle leads"; jitter inside that dead band is ignored.
+3. Count **one step each time the leading tip flips** from one finger to the
+   other — i.e. the tips genuinely crossed. Wiggling a single finger without
+   its tip passing the other can never flip the leader, so it never counts.
 
-When no hand is detected, the value decays toward 0 so the runner coasts to a stop
-rather than freezing. Every knob (`emaAlpha`, `scale`, which landmarks count) is a
-documented constant in `DEFAULT_TUNING`.
+The result is a **flat cumulative count** — no velocity, no smoothing, no decay.
+One crossing = one step, always.
 
 ---
 
@@ -250,13 +260,16 @@ All scoring is server-side ([`backend/src/game/engine.ts`](backend/src/game/engi
 tuned in [`backend/src/config.ts`](backend/src/config.ts)). A 90-second round works
 like this:
 
-- **Banked distance points.** Every tick you bank the ground covered × a points
-  rate. Because faster fingers cover more ground, speed is rewarded automatically.
-- **Sustained-effort combo (×1 → ×3).** A multiplier **builds** while you hold the
-  runner above a speed threshold and **decays ~2× faster** when you drop below it.
-  Banked points are weighted by the live multiplier, so consistent fast wiggling
-  scores far more than one-off bursts. The current combo streams in the `state`
-  message (`multiplier`) and shows live in the HUD.
+- **Flat steps → distance.** Every accepted step advances the runner exactly
+  `distancePerStep` units (one stride), and each tick you bank the ground covered
+  × a points rate. N steps is always N strides — there is no speed curve to game.
+  A server-side rate cap (`maxStepsPerSecond`, far above real finger speed)
+  discards impossible bursts instead of banking them.
+- **Sustained-effort combo (×1 → ×3).** A multiplier **builds** while your
+  stepping pace stays above a threshold and **decays ~2× faster** when you drop
+  below it. Banked points are weighted by the live multiplier, so consistent
+  stepping scores far more than one-off bursts. The current combo streams in the
+  `state` message (`multiplier`) and shows live in the HUD.
 - **Finish bonus.** Reaching the finish line (`trackLength`, ~18k units — an
   endurance goal that takes most of the round) adds a bonus per second left on the
   clock. It's kept modest so it rewards a strong finish without dominating.

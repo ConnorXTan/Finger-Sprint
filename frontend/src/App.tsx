@@ -59,13 +59,17 @@ function HomeScreen({ engine, lbKey }: { engine: FingerSprintEngine; lbKey: numb
       <div className="panel panel--hero">
         <p className="lede">
           "Walk" your index and middle fingers in front of the webcam — like two
-          little legs. Each step drives your runner; the faster you step, the
-          faster you sprint. Cover the most distance before the timer runs out!
+          little legs. A step counts each time your two fingertips cross each
+          other, and every step moves your runner one stride. Rack up the most
+          steps before the timer runs out!
         </p>
         <ol className="howto">
           <li>Allow camera access (video never leaves your device).</li>
           <li>Hold one hand up so the skeleton appears.</li>
-          <li>Walk your index + middle fingers — alternate them like legs. 🚶💨</li>
+          <li>
+            Walk your index + middle fingers — a step counts only when the two
+            fingertips cross. 🚶💨
+          </li>
         </ol>
         <button className="btn btn--primary btn--lg" onClick={() => void engine.prepare()}>
           Start
@@ -111,24 +115,24 @@ function ErrorScreen({ engine }: { engine: FingerSprintEngine }) {
 }
 
 function CalibrationScreen({ engine }: { engine: FingerSprintEngine }) {
-  const { stepsPerMinute, steps, handDetected } = engine;
+  const { steps, handDetected } = engine;
   return (
     <div className="screen screen--center">
       <div className="panel panel--calibrate">
         <h2>Calibration</h2>
         <p className="muted">
           {handDetected
-            ? "Hand detected! Walk your index + middle fingers — each step counts."
+            ? "Hand detected! A step counts each time your index and middle fingertips cross."
             : "Hold your hand up to the camera so the skeleton appears."}
         </p>
 
         <div className={`big-intensity${handDetected ? " is-live" : ""}`}>
-          <span className="big-intensity__value">{stepsPerMinute}</span>
-          <span className="big-intensity__label">steps / min</span>
+          <span className="big-intensity__value">{steps}</span>
+          <span className="big-intensity__label">steps</span>
         </div>
 
         <div className={`detect-badge${handDetected ? " is-on" : ""}`}>
-          {handDetected ? `✋ tracking · ${steps} steps` : "no hand"}
+          {handDetected ? "✋ tracking" : "no hand"}
         </div>
 
         <button
@@ -150,17 +154,10 @@ function PlayScreen({ engine }: { engine: FingerSprintEngine }) {
       <div className="stage">
         <GameView
           gameStateRef={engine.gameStateRef}
-          intensityRef={engine.intensityRef}
           legPoseRef={engine.legPoseRef}
           trackLength={trackLength}
         />
-        <Hud
-          state={engine.gameState}
-          intensity={engine.intensity}
-          steps={engine.steps}
-          stepsPerMinute={engine.stepsPerMinute}
-          trackLength={trackLength}
-        />
+        <Hud state={engine.gameState} steps={engine.steps} trackLength={trackLength} />
       </div>
     </div>
   );

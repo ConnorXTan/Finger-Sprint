@@ -15,20 +15,19 @@ export const config = {
     /** Server physics + broadcast tick. Client sends movement at a similar rate. */
     tickMs: 100,
 
-    /* ---- intensity -> speed ---- */
-    /** Incoming intensity is clamped to this (anti-cheat / sanity bound). */
-    maxIntensity: 120,
-    /** Target speed (units/s) = intensity * this. */
-    intensityToSpeed: 4.5,
-    /** Hard cap on character speed regardless of intensity. */
-    maxSpeed: 600,
-    /** How quickly speed ramps up toward the target (units/s per second). */
-    accelPerSec: 900,
-    /** How quickly speed bleeds off toward the target / zero. */
-    decelPerSec: 700,
-    /** If no movement message arrives within this window, intensity is treated
-     *  as 0 so the runner coasts to a stop. */
-    staleMs: 400,
+    /* ---- steps -> distance ----
+     * Movement is a FLAT step count: the client reports its cumulative total of
+     * fingertip crossings, and every accepted step advances the runner exactly
+     * one stride. No rates, no acceleration curves — N steps is always N
+     * strides of distance. */
+    /** Distance units the runner advances per counted step (one stride). */
+    distancePerStep: 70,
+    /** Max steps accepted per second (anti-cheat / sanity bound — real finger
+     *  crossings top out well below this). */
+    maxStepsPerSecond: 12,
+    /** Smoothing (0..1 per tick) for the display pace derived from stepping.
+     *  Cosmetic only — drives the runner animation and the combo threshold. */
+    speedEmaAlpha: 0.15,
 
     /* ---- scoring ---- */
     /** Base points banked per distance unit covered (before the combo multiplier). */
@@ -40,9 +39,9 @@ export const config = {
     /* ---- sustained-effort combo multiplier ----
      * Points banked each tick are multiplied by a combo that grows while you
      * keep the runner above `comboSpeedThreshold` and decays (faster) when you
-     * drop below it. Rewards consistent fast wiggling over one-off bursts. */
-    /** Speed above which the combo builds (here ~47% of maxSpeed). */
-    comboSpeedThreshold: 280,
+     * drop below it. Rewards consistent stepping over one-off bursts. */
+    /** Pace above which the combo builds (≈2.6 steps/sec at 70 units/step). */
+    comboSpeedThreshold: 180,
     /** Multiplier gained per second of sustained speed. */
     comboRampPerSec: 0.4,
     /** Multiplier lost per second below the threshold (decays ~2x faster than it builds). */

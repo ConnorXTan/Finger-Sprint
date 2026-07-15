@@ -1,6 +1,12 @@
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 import { HAND_MODEL_URL, MEDIAPIPE_WASM } from "../config";
-import type { Landmark } from "./movementIntensity";
+
+/** One MediaPipe hand landmark, in normalized 0..1 image coordinates. */
+export interface Landmark {
+  x: number;
+  y: number;
+  z?: number;
+}
 
 export interface HandFrame {
   /** 21 landmarks for the first detected hand, or null if none. */

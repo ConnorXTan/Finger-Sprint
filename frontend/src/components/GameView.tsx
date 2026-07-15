@@ -8,17 +8,15 @@ const CANVAS_H = 540;
 
 /**
  * The game scene. Runs its own animation loop, reading the latest authoritative
- * state and intensity from refs so it animates at full frame rate without
+ * state and leg pose from refs so it animates at full frame rate without
  * triggering React re-renders.
  */
 export function GameView({
   gameStateRef,
-  intensityRef,
   legPoseRef,
   trackLength,
 }: {
   gameStateRef: MutableRefObject<StateMessage | null>;
-  intensityRef: MutableRefObject<number>;
   legPoseRef: MutableRefObject<LegPose | null>;
   trackLength: number;
 }) {
@@ -32,7 +30,6 @@ export function GameView({
       if (canvas && ctx) {
         renderGame(ctx, canvas.width, canvas.height, {
           state: gameStateRef.current,
-          intensity: intensityRef.current,
           legPose: legPoseRef.current,
           trackLength,
           nowMs: t,
@@ -42,7 +39,7 @@ export function GameView({
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [gameStateRef, intensityRef, legPoseRef, trackLength]);
+  }, [gameStateRef, legPoseRef, trackLength]);
 
   return <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} className="game-canvas" />;
 }

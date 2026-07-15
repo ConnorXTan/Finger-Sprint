@@ -1,17 +1,14 @@
 import type { StateMessage } from "@finger-sprint/shared";
 
-/** Overlay HUD: timer, distance, speed, score, and the live cadence gauge. */
+/** Overlay HUD: timer, score, distance, and the flat step count. */
 export function Hud({
   state,
-  intensity,
   steps,
-  stepsPerMinute,
   trackLength,
 }: {
   state: StateMessage | null;
-  intensity: number;
+  /** Local (client-side) step count — shown until the server state arrives. */
   steps: number;
-  stepsPerMinute: number;
   trackLength: number;
 }) {
   const timeSec = state ? Math.ceil(state.timeRemaining / 1000) : 0;
@@ -19,8 +16,8 @@ export function Hud({
   const score = state?.score ?? 0;
   const multiplier = state?.multiplier ?? 1;
   const comboActive = multiplier > 1;
-  // Cadence gauge maxes out around the server's intensity clamp (120).
-  const effort = Math.max(0, Math.min(1, intensity / 120));
+  // The server's accepted step count is authoritative during a round.
+  const shownSteps = state?.steps ?? steps;
 
   return (
     <div className="hud">
@@ -37,15 +34,7 @@ export function Hud({
 
       <div className="hud__row">
         <Stat label="Distance" value={`${distance} / ${trackLength}`} />
-        <Stat label="Steps" value={`${steps}`} />
-      </div>
-
-      <div className="hud__effort">
-        <span className="hud__effort-label">Step rate</span>
-        <div className="hud__effort-track">
-          <div className="hud__effort-fill" style={{ width: `${effort * 100}%` }} />
-        </div>
-        <span className="hud__effort-value">{stepsPerMinute}/min</span>
+        <Stat label="Steps" value={`${shownSteps}`} />
       </div>
     </div>
   );

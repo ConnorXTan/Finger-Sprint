@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject, type MutableRefObject } from "react";
 import { drawHandOverlay } from "../render/renderGame";
-import type { Landmark } from "../game/movementIntensity";
+import type { Landmark } from "../game/handTracker";
 
 /**
  * Small selfie-view webcam preview with the live hand skeleton drawn on top.

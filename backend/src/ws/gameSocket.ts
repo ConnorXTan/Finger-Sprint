@@ -56,7 +56,7 @@ export function attachGameSocket(server: Server): WebSocketServer {
       if (!bound && typeof msg.sessionId === "string") bind(msg.sessionId);
 
       if (bound && msg.sessionId === bound.id) {
-        bound.applyMovement(Number(msg.intensity) || 0, Date.now());
+        bound.applySteps(Number(msg.steps) || 0);
       }
     });
 

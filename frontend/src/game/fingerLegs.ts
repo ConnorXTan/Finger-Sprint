@@ -3,38 +3,45 @@
  *  FINGER -> LEG POSE   (drives the on-screen runner's two legs directly)
  * ============================================================================
  *
- * The runner has two legs. This module turns the INDEX finger (landmark 8) and
- * the MIDDLE finger (landmark 12) into a signed "swing" for each leg so the
- * cartoon's legs mirror your actual fingers frame by frame.
+ * The runner has two legs. This module reads exactly two fingertips — the
+ * POINTER/INDEX fingertip (MediaPipe landmark 8) and the MIDDLE fingertip
+ * (MediaPipe landmark 12) — and reports, per frame:
  *
- *   index finger  -> one leg
- *   middle finger -> the other leg
+ *   1. `index` / `middle` — a baseline-centered "swing" (~-1..+1) for ANIMATING
+ *      the cartoon legs. Centered on a slow per-finger baseline so the legs
+ *      look symmetric despite the middle finger being naturally longer.
+ *      ANIMATION ONLY — never use these for step detection: the baseline makes
+ *      a single wiggling finger oscillate around 0, which reads like crossing.
+ *   2. `indexReach` / `middleReach` — the RAW reach of each fingertip along the
+ *      hand axis (wrist -> middle knuckle), in hand-scale units, no baseline.
+ *      These are the ground truth of where the tips actually are; the step
+ *      counter compares them directly to detect the tips physically crossing.
  *
- * Each swing is roughly -1..+1, where 0 is neutral, positive swings the leg one
- * way and negative the other. Like the intensity metric, it measures each
- * fingertip *relative to the hand* (so moving the whole hand doesn't move the
- * legs) — here using the fingertip's extension along the hand axis.
- *
- * To make swing centered at 0 regardless of how long your fingers are (the
- * middle finger naturally reaches further than the index), we track a slow
- * moving baseline per finger and report the deviation from it. The baseline
- * adapts far slower than a running cadence, so it removes the constant offset
- * without flattening the actual stride motion.
+ * Everything is measured *relative to the hand* (origin at the wrist, axis to
+ * the middle knuckle, normalized by that distance), so moving/rotating/zooming
+ * the whole hand changes neither swings nor reaches — only real finger motion.
  */
 
-import type { Landmark } from "./movementIntensity";
+import type { Landmark } from "./handTracker";
+
+/** Pointer/index fingertip — MediaPipe hand landmark 8. */
+export const INDEX_TIP = 8;
+/** Middle fingertip — MediaPipe hand landmark 12. */
+export const MIDDLE_TIP = 12;
 
 export interface LegPose {
-  /** Index-finger leg swing, roughly -1..+1. */
+  /** Index-finger leg swing, roughly -1..+1 (baseline-centered, animation only). */
   index: number;
-  /** Middle-finger leg swing, roughly -1..+1. */
+  /** Middle-finger leg swing, roughly -1..+1 (baseline-centered, animation only). */
   middle: number;
+  /** Raw index fingertip reach along the hand axis, in hand-scale units. */
+  indexReach: number;
+  /** Raw middle fingertip reach along the hand axis, in hand-scale units. */
+  middleReach: number;
 }
 
 const WRIST = 0;
 const MIDDLE_MCP = 9;
-const INDEX_TIP = 8;
-const MIDDLE_TIP = 12;
 
 export class FingerLegTracker {
   private baseIndex = 0;
@@ -95,6 +102,8 @@ export class FingerLegTracker {
     return {
       index: clamp((eIndex - this.baseIndex) * this.swingScale, -this.clampTo, this.clampTo),
       middle: clamp((eMiddle - this.baseMiddle) * this.swingScale, -this.clampTo, this.clampTo),
+      indexReach: eIndex,
+      middleReach: eMiddle,
     };
   }
 }

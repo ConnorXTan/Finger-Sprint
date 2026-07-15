@@ -71,13 +71,17 @@ export interface ApiError {
 
 /**
  * client -> server.
- * Sent on a fixed tick (~100ms), NOT every frame. `intensity` is the smoothed,
- * aggregated finger-movement metric computed entirely on the client.
+ * Sent on a fixed tick (~100ms), NOT every frame. `steps` is the flat, total
+ * number of steps taken this round — one step per genuine fingertip crossing
+ * (index tip and middle tip swap order). Cumulative and monotonic, so lost or
+ * reordered messages self-heal: the server advances by the delta between
+ * successive totals.
  */
 export interface MovementMessage {
   type: "movement";
   sessionId: string;
-  intensity: number;
+  /** Total steps counted this round so far (flat count, not a rate). */
+  steps: number;
   /** Client epoch ms when the metric was sampled. */
   timestamp: number;
 }
@@ -91,10 +95,12 @@ export interface StateMessage {
   type: "state";
   /** 0..1 progress along the track (for rendering the finish line). */
   position: number;
-  /** Current character speed (distance units / second). */
+  /** Display pace (distance units / second) derived from recent stepping. */
   speed: number;
   /** Distance covered so far (units). */
   distance: number;
+  /** Total steps the server has accepted this round (authoritative). */
+  steps: number;
   score: number;
   /** Live sustained-effort combo multiplier applied to incoming points (>= 1). */
   multiplier: number;

@@ -5,8 +5,7 @@ import type {
   StateMessage,
 } from "@finger-sprint/shared";
 import { MOVEMENT_TICK_MS } from "../config";
-import { createHandTracker, type HandTracker } from "./handTracker";
-import type { Landmark } from "./movementIntensity";
+import { createHandTracker, type HandTracker, type Landmark } from "./handTracker";
 import { FingerLegTracker, type LegPose } from "./fingerLegs";
 import { StepCounter } from "./stepCounter";
 import { useWebcam } from "./useWebcam";
@@ -16,7 +15,7 @@ import { createSession, endSession, GameConnection, submitScore } from "../net/g
  * Phases of the client experience:
  *   idle      - nothing started
  *   loading   - asking for the webcam + downloading the MediaPipe model
- *   ready     - tracking live; shows the intensity number (calibration screen)
+ *   ready     - tracking live; shows the live step count (calibration screen)
  *   playing   - a round is in progress; metrics stream to the server
  *   finished  - round over; final score available
  *   error     - webcam/model failure (see `error`)
@@ -27,10 +26,10 @@ export type GamePhase = "idle" | "loading" | "ready" | "playing" | "finished" | 
  * The whole client engine in one hook. Owns the tracking loop, the fixed-rate
  * metric sender, and the lifecycle (prepare -> round -> finish -> submit).
  *
- * Smooth per-frame data (intensity, landmarks, latest game state) is exposed via
+ * Smooth per-frame data (landmarks, leg pose, latest game state) is exposed via
  * refs so the canvas renderer can read it every animation frame without causing
- * React re-renders. Coarse data for the DOM (phase, displayed intensity, the
- * latest state for the HUD) is exposed as React state.
+ * React re-renders. Coarse data for the DOM (phase, the step count, the latest
+ * state for the HUD) is exposed as React state.
  */
 export function useFingerSprint() {
   const { videoRef, status: webcamStatus, error: webcamError, start: startWebcam, stop: stopWebcam } =
@@ -38,18 +37,14 @@ export function useFingerSprint() {
 
   const [phase, setPhase] = useState<GamePhase>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [intensity, setIntensity] = useState(0);
   const [steps, setSteps] = useState(0);
-  const [stepsPerMinute, setStepsPerMinute] = useState(0);
   const [handDetected, setHandDetected] = useState(false);
   const [gameState, setGameState] = useState<StateMessage | null>(null);
   const [session, setSession] = useState<CreateSessionResponse | null>(null);
   const [result, setResult] = useState<EndSessionResponse | null>(null);
 
   // Per-frame data for the renderer (no re-render on update).
-  const intensityRef = useRef(0);
   const stepsRef = useRef(0);
-  const cadenceRef = useRef(0); // smoothed steps per second
   const landmarksRef = useRef<Landmark[] | null>(null);
   const legPoseRef = useRef<LegPose | null>(null);
   const gameStateRef = useRef<StateMessage | null>(null);
@@ -65,7 +60,7 @@ export function useFingerSprint() {
   const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const finishingRef = useRef(false);
 
-  /** rAF loop: detect hand -> update intensity -> stash for the renderer. */
+  /** rAF loop: detect hand -> count steps -> stash for the renderer. */
   const runTrackingLoop = useCallback(() => {
     const loop = (timeMs: number) => {
       const tracker = trackerRef.current;
@@ -74,13 +69,11 @@ export function useFingerSprint() {
         try {
           const { landmarks } = tracker.detect(video, timeMs);
           landmarksRef.current = landmarks;
-          // Index/middle finger swing drives both the runner's legs and the
-          // step detector; the step cadence is the movement value we send.
+          // The leg pose animates the runner; its raw tip reaches feed the step
+          // counter. The flat step total is the only movement value we send.
           const legPose = legTrackerRef.current.update(landmarks);
           legPoseRef.current = legPose;
-          intensityRef.current = stepCounterRef.current.update(legPose, timeMs);
-          stepsRef.current = stepCounterRef.current.totalSteps;
-          cadenceRef.current = stepCounterRef.current.stepsPerSecond;
+          stepsRef.current = stepCounterRef.current.update(legPose, timeMs);
         } catch {
           // A transient detect error shouldn't kill the loop.
         }
@@ -90,15 +83,12 @@ export function useFingerSprint() {
     rafRef.current = requestAnimationFrame(loop);
   }, [videoRef]);
 
-  /** Fixed-rate loop: surface intensity to the UI and stream it to the server. */
+  /** Fixed-rate loop: surface the step count to the UI and stream it to the server. */
   const runSendLoop = useCallback(() => {
     sendTimerRef.current = setInterval(() => {
-      const value = intensityRef.current;
-      setIntensity(value);
       setSteps(stepsRef.current);
-      setStepsPerMinute(Math.round(cadenceRef.current * 60));
       setHandDetected(landmarksRef.current != null);
-      connectionRef.current?.sendMovement(value);
+      connectionRef.current?.sendSteps(stepsRef.current);
     }, MOVEMENT_TICK_MS);
   }, []);
 
@@ -207,9 +197,7 @@ export function useFingerSprint() {
     submitName,
     playAgain,
     // data for the UI
-    intensity,
     steps,
-    stepsPerMinute,
     handDetected,
     gameState,
     session,
@@ -219,7 +207,6 @@ export function useFingerSprint() {
     webcamError,
     // refs for the canvas renderer
     videoRef,
-    intensityRef,
     landmarksRef,
     legPoseRef,
     gameStateRef,

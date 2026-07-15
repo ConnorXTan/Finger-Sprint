@@ -74,12 +74,13 @@ export class GameConnection {
     });
   }
 
-  sendMovement(intensity: number): void {
+  /** Report the flat total step count for this round (cumulative, monotonic). */
+  sendSteps(steps: number): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
     const msg: MovementMessage = {
       type: "movement",
       sessionId: this.sessionId,
-      intensity,
+      steps,
       timestamp: Date.now(),
     };
     this.ws.send(JSON.stringify(msg));
