@@ -13,9 +13,15 @@
     "dev:backend": "npm run dev -w @finger-sprint/backend",
     "dev:frontend": "npm run dev -w @finger-sprint/frontend",
     "typecheck": "npm run typecheck -w @finger-sprint/backend && npm run typecheck -w @finger-sprint/frontend",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "npm run build -w @finger-sprint/frontend"
   },
   "devDependencies": {
-    "concurrently": "^10.0.0"
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "concurrently": "^10.0.0",
+    "jsdom": "^29.1.1",
+    "vitest": "^4.1.10"
   }
 }
