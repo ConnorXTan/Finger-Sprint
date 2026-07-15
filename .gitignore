@@ -8,3 +8,4 @@ backend/data/
 .DS_Store
 .vscode/
 .idea/
+.gstack/
