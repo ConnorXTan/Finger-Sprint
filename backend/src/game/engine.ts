@@ -1,4 +1,4 @@
-import type { StateMessage } from "@finger-sprint/shared";
+import type { LeaderboardEntry, StateMessage } from "@finger-sprint/shared";
 import { config } from "../config";
 
 const G = config.game;
@@ -25,6 +25,9 @@ export class GameSession {
   /** Total steps accepted this round. */
   steps = 0;
   finished = false;
+  /** Leaderboard entry created for this session, if the score was submitted.
+   *  One entry per session — repeat submissions return this one. */
+  leaderboardEntry: LeaderboardEntry | null = null;
 
   /** Running, banked score (distance covered each tick × the live multiplier). */
   private scoreAcc = 0;

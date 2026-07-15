@@ -68,8 +68,16 @@ apiRouter.post("/leaderboard", (req, res) => {
     return;
   }
 
+  // One leaderboard entry per session: a repeat submit (client retry, or an
+  // attempt to spam the board with the same score) returns the existing entry.
+  if (session.leaderboardEntry) {
+    res.json({ entry: session.leaderboardEntry } satisfies SubmitScoreResponse);
+    return;
+  }
+
   const cleanName = name.trim().slice(0, 24);
   const entry = leaderboardRepo.insert(cleanName, session.score, session.distance);
+  session.leaderboardEntry = entry;
   const body: SubmitScoreResponse = { entry };
   res.status(201).json(body);
 });
