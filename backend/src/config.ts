@@ -22,8 +22,9 @@ export const config = {
      * strides of distance. */
     /** Distance units the runner advances per counted step (one stride). */
     distancePerStep: 70,
-    /** Max steps accepted per second (anti-cheat / sanity bound — real finger
-     *  crossings top out well below this). */
+    /** Max steps accepted per second, and also the burst ceiling of the token
+     *  bucket enforcing it (anti-cheat / sanity bound — real finger crossings
+     *  top out well below this). */
     maxStepsPerSecond: 12,
     /** Smoothing (0..1 per tick) for the display pace derived from stepping.
      *  Cosmetic only — drives the runner animation and the combo threshold. */

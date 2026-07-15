@@ -36,6 +36,12 @@ export class GameSession {
   private lastClientTotal = 0;
   /** Steps reported since the last tick, waiting to be applied. */
   private pendingSteps = 0;
+  /**
+   * Token bucket for the step rate cap: refills at maxStepsPerSecond up to a
+   * burst ceiling of the same size, so a legitimate burst (frames batched by a
+   * browser hiccup) is accepted while sustained input stays capped.
+   */
+  private stepAllowance: number = G.maxStepsPerSecond;
 
   private timer: ReturnType<typeof setInterval> | null = null;
   private onState: ((s: StateMessage) => void) | null = null;
@@ -78,10 +84,15 @@ export class GameSession {
     this.lastTickTime = now;
 
     // Flat step accounting: each accepted step is exactly one stride. The only
-    // adjustment is a rate cap far above human finger speed (anti-cheat) —
-    // excess is dropped, never banked.
-    const cap = Math.ceil(G.maxStepsPerSecond * dt);
-    const stepsThisTick = Math.min(this.pendingSteps, cap);
+    // adjustment is a rate cap far above human finger speed (anti-cheat),
+    // enforced as a token bucket so legitimate bursts (frames batched by a
+    // browser hiccup) still count — excess beyond it is dropped, never banked.
+    this.stepAllowance = Math.min(
+      G.maxStepsPerSecond,
+      this.stepAllowance + G.maxStepsPerSecond * dt,
+    );
+    const stepsThisTick = Math.min(this.pendingSteps, Math.floor(this.stepAllowance));
+    this.stepAllowance -= stepsThisTick;
     this.pendingSteps = 0;
     this.steps += stepsThisTick;
 
