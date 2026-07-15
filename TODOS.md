@@ -14,3 +14,7 @@ Design debt deferred from the 2026-07-15 ink-on-paper design review
 - [ ] **Midnight-ink variant** — inverted theme (near-black paper, white ink, same red)
   for dark rooms. Why: paper glare in dim party rooms; token-file-only change once the
   system exists. Depends on: ink redo shipped. (human: ~2h / CC: ~10min)
+- [ ] **Session resume across page reload** — persist sessionId (sessionStorage), rejoin a
+  live round after accidental reload. Why: reload mid-round orphans the round today; T10's
+  disconnect wiring covers socket drops, not page loss. Needs backend rejoin semantics
+  (new scope, from 2026-07-15 eng review). Depends on: nothing. (human: ~half day / CC: ~30min)
