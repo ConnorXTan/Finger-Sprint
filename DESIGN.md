@@ -22,9 +22,44 @@ panels, no drop shadows, no `shadowBlur`.
 
 ## The red budget
 
-`--signal` appears in exactly three places: the combo stamp, the finish flag,
-and the player's own leaderboard row. Never for status, errors, buttons, or
-decoration. Errors are ink with a heavy hand-drawn double underline.
+`--signal` appears in exactly three places: the combo stamp, the finish flag
+(including the red flag glyph on a WON round's results — a timeout gets an ink
+stopwatch instead), and the player's own leaderboard row (pinned below the
+top-10 with rank + gap caption when the player lands off-board). Never for
+status, errors, buttons, or decoration. Errors are ink with a scratchy single
+strike-underline + drawn asterisk — the double underline is reserved for the
+title's signature treatment.
+
+## Ink tint scale
+
+ink-100 `#1a1a1a` (primary strokes/text) · ink-55 `#595959` (muted text, the
+only allowed) · ink-28 (28% opacity — decorative strokes only, never text) ·
+hairline (20%, 1px rules).
+
+## Play HUD slots
+
+Timer top-left. **Score is the top-right hero** (the game ranks by score);
+red combo stamp overlaps the score block's corner; distance readout small
+beneath score (primary distance carrier = the top progress line). Pace gauge
+bottom-left (180° arc, radius ≈56px @ 960w) with small steps readout beside
+it. Runner band below 35% canvas height; HUD above 22%. Wireframe:
+`~/.gstack/projects/ConnorXTan-glova/designs/mockup-20260715/ink-sketch.png`.
+
+## Motion timings
+
+Combo stamp: two-frame slam per integer multiplier increase, then still.
+Results: score draws on ~600ms → red own-row settles into leaderboard → form
+fades in ~400ms later (never dump the player into an input at the peak); red
+hanko stamp slams once, then still. DOM feedback 160ms ease-out; screen fades
+200ms; check draw-on 400ms. rough.js: roughness 1.5 / bowing 1 (UI), 2.0
+(hills). Idle home scene boils at 5Hz; play at 10Hz.
+
+## Copy voice
+
+Lowercase handwritten everywhere. Locked labels: "start running" (home),
+"start the sprint" (calibration — enabled after ≥3 practice steps), "run
+again" (results). Trust line under start CTA and on loading: "uses your
+camera — video never leaves your device."
 
 ## Typography
 
@@ -58,6 +93,10 @@ decoration. Errors are ink with a heavy hand-drawn double underline.
   40% ink opacity.
 - Input focus: underline stroke doubles.
 - Touch targets ≥ 44px.
+- Canvas HUD: visually-hidden `aria-live="polite"` mirror for time/score/result;
+  canvas is devicePixelRatio-aware (`ctx.scale(dpr, dpr)`) or numerals blur.
+- Calibration coaching: hand detected but no steps for ~3s → "walk them —
+  cross your fingertips" instruction + gesture animation.
 
 ## Do / Don't
 
