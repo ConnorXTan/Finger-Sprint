@@ -7,10 +7,15 @@ Source of truth for all visual work. Full design doc:
 ## Tokens
 
 ```css
---paper:  #FAF7F0;  /* background everywhere */
---ink:    #1a1a1a;  /* every stroke, every glyph */
---signal: #C0392B;  /* the ONLY accent — see red budget */
+--paper:     #FAF7F0;  /* background everywhere */
+--ink:       #1a1a1a;  /* every stroke, every glyph */
+--ink-muted: #595959;  /* the ONLY muted text color (≈5.9:1 on paper) */
+--signal:    #C0392B;  /* the ONLY accent — see red budget */
 ```
+
+Opacity-based muting is for decorative strokes only, never text. Below 820px,
+home/leaderboard/results render fully; the play path shows the designed
+"runs best on a laptop" ink card — no half-working mobile game.
 
 `--good` / `--bad` / navy / yellow / coral are retired. No gradients, no glassy
 panels, no drop shadows, no `shadowBlur`.
