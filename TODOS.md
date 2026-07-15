@@ -11,9 +11,8 @@ Design debt deferred from the 2026-07-15 ink-on-paper design review
   boil rate 8→14Hz with speed, ghost gesture-line smears. Why: the biggest "whoa,"
   staged deliberately after B ships so tuning happens against a finished game.
   Depends on: ink kernel landed. (human: weekend evenings / CC: ~2-3h + tuning passes)
-- [ ] **Midnight-ink variant** — inverted theme (near-black paper, white ink, same red)
-  for dark rooms. Why: paper glare in dim party rooms; token-file-only change once the
-  system exists. Depends on: ink redo shipped. (human: ~2h / CC: ~10min)
+- [x] **Midnight-ink variant** — PROMOTED to v1 scope at eng review (2026-07-15, task T15):
+  ships as the `prefers-color-scheme: dark` palette. Kept here for the trail.
 - [ ] **Session resume across page reload** — persist sessionId (sessionStorage), rejoin a
   live round after accidental reload. Why: reload mid-round orphans the round today; T10's
   disconnect wiring covers socket drops, not page loss. Needs backend rejoin semantics

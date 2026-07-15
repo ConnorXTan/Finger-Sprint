@@ -100,7 +100,15 @@ camera — video never leaves your device."
 
 ## Do / Don't
 
-- DO draw the HUD in-canvas, hand-lettered, loud — the numbers are the drama.
+- DO keep the HUD loud and hand-lettered — the numbers are the drama. It lives
+  as a DOM overlay (`Hud.tsx`, Caveat, boil-synced ±1px CSS jitter, `inkSvg`
+  stamps) positioned inside the stage; the canvas draws only the scene.
+  (Eng-review reversal of the earlier in-canvas plan: identical look, free
+  accessibility, no `measureText`, renderer stays pure.)
+- DO ship both palettes: paper (light default) and **midnight ink**
+  (`prefers-color-scheme: dark` — near-black paper #12100C, white ink, same
+  red). The red budget is four achievement marks: combo stamp, finish flag
+  (incl. results win glyph), own leaderboard row, results hanko seal.
 - DO design empty states (empty leaderboard = runner doodle + "nobody has run
   yet — be the first name here").
 - DON'T reintroduce color for convenience; shape and weight carry meaning.
