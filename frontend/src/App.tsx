@@ -30,6 +30,12 @@ export default function App() {
   const [lbKey, setLbKey] = useState(0);
   const [submitted, setSubmitted] = useState<LeaderboardEntry | undefined>(undefined);
 
+  // A new round invalidates the previous round's submission — otherwise
+  // round 2's results show round 1's rank and pinned row (stale data).
+  useEffect(() => {
+    if (phase === "playing") setSubmitted(undefined);
+  }, [phase]);
+
   const showThumb = phase === "ready" || phase === "playing" || phase === "finished";
 
   return (

@@ -135,9 +135,11 @@ function buildHillLayer(
           pixelScale;
         pts.push([px, py]);
       }
+      // Seeds and jitter MUST derive from x modulo the period, or the tile is
+      // not actually periodic and every scroll wrap visibly reshapes strokes.
       rc.linearPath(pts, {
         ...ROUGH_LANDSCAPE,
-        seed: VARIANT_SEEDS[v] + x, // vary per hump, fixed per variant
+        seed: VARIANT_SEEDS[v] + (x % cfg.period),
         stroke: cfg.color,
         strokeWidth: cfg.width * pixelScale,
       });
@@ -146,8 +148,9 @@ function buildHillLayer(
         ctx.lineWidth = pixelScale;
         ctx.lineCap = "round";
         for (let hx = x + humpW * 0.3; hx < x + humpW * 0.7; hx += 16) {
+          const phase = Math.round(hx % cfg.period);
           ctx.beginPath();
-          ctx.moveTo((hx + hashJitter(hx | 0, v) * 2) * pixelScale, (cfg.groundY - 9) * pixelScale);
+          ctx.moveTo((hx + hashJitter(phase, v) * 2) * pixelScale, (cfg.groundY - 9) * pixelScale);
           ctx.lineTo((hx - 8) * pixelScale, (cfg.groundY + 3) * pixelScale);
           ctx.stroke();
         }
@@ -178,9 +181,10 @@ function buildGroundLayer(palette: InkPalette, pixelScale: number, groundY: numb
     ctx.lineWidth = 2;
     const dashY = groundY + (SCENE_H - groundY) * 0.42;
     for (let x = 0; x < tileW; x += period / 2) {
+      const phase = Math.round(x % period); // keep dash jitter period-repeating
       ctx.beginPath();
-      ctx.moveTo(x + hashJitter(x | 0, v) * 2, dashY + hashJitter(x | 0, v, 3) * 1.5);
-      ctx.lineTo(x + 26, dashY + hashJitter((x | 0) + 1, v, 3) * 1.5);
+      ctx.moveTo(x + hashJitter(phase, v) * 2, dashY + hashJitter(phase, v, 3) * 1.5);
+      ctx.lineTo(x + 26, dashY + hashJitter(phase + 1, v, 3) * 1.5);
       ctx.stroke();
     }
     canvases.push(canvas);

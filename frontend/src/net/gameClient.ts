@@ -48,6 +48,7 @@ export function submitScore(sessionId: string, name: string): Promise<SubmitScor
  */
 export class GameConnection {
   private ws: WebSocket | null = null;
+  private opened = false;
 
   constructor(
     private readonly sessionId: string,
@@ -60,9 +61,17 @@ export class GameConnection {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(wsUrl(this.sessionId));
       this.ws = ws;
-      ws.onopen = () => resolve();
+      ws.onopen = () => {
+        this.opened = true;
+        resolve();
+      };
       ws.onerror = () => reject(new Error("WebSocket connection failed"));
-      ws.onclose = () => this.onClose?.();
+      // A socket that never opened also fires `close` — that's the connect
+      // failure path (already surfaced via the rejected promise), not an
+      // abnormal mid-round drop. Only report closes after a successful open.
+      ws.onclose = () => {
+        if (this.opened) this.onClose?.();
+      };
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
@@ -87,6 +96,9 @@ export class GameConnection {
   }
 
   close(): void {
+    // Deliberate close: detach the handler so a delayed close event from a
+    // dying socket can't fire the abnormal-disconnect path into a later round.
+    if (this.ws) this.ws.onclose = null;
     this.ws?.close();
     this.ws = null;
   }

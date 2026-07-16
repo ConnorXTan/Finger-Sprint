@@ -43,17 +43,18 @@ export function GameView({
     () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
   );
 
-  // OS theme + motion preferences, live.
+  // OS theme + motion preferences, live. Optional-chained: old Safari MQLs
+  // lack addEventListener — the preference then just isn't live-updating.
   useEffect(() => {
-    const dm = window.matchMedia("(prefers-color-scheme: dark)");
-    const rm = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const dm = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const rm = window.matchMedia?.("(prefers-reduced-motion: reduce)");
     const onDark = (e: MediaQueryListEvent) => setDark(e.matches);
     const onMotion = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
-    dm.addEventListener("change", onDark);
-    rm.addEventListener("change", onMotion);
+    dm?.addEventListener?.("change", onDark);
+    rm?.addEventListener?.("change", onMotion);
     return () => {
-      dm.removeEventListener("change", onDark);
-      rm.removeEventListener("change", onMotion);
+      dm?.removeEventListener?.("change", onDark);
+      rm?.removeEventListener?.("change", onMotion);
     };
   }, []);
 
@@ -74,7 +75,13 @@ export function GameView({
       canvas.width = Math.round(SCENE_W * scale);
       canvas.height = Math.round(SCENE_H * scale);
       scaleRef.current = scale;
-      tilesRef.current = buildSceneTiles(palette, scale);
+      try {
+        // Cap tile resolution at 2x: 3x-dpr phones would pay ~2.25x the canvas
+        // memory for no visible gain and can trip Safari's canvas quota.
+        tilesRef.current = buildSceneTiles(palette, Math.min(scale, 2));
+      } catch {
+        tilesRef.current = null; // renderGame degrades gracefully without tiles
+      }
       sceneVersionRef.current++;
     };
     fit(true); // force: theme flips re-run this effect and must rebuild tiles

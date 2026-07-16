@@ -64,6 +64,10 @@ export function useFingerSprint() {
   const rafRef = useRef<number | null>(null);
   const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const finishingRef = useRef(false);
+  /** Synchronous re-entrancy guard — `phase` closure state is stale on rapid double-clicks. */
+  const startingRef = useRef(false);
+  /** Pending disconnect-notice timer, cleared on any round transition. */
+  const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** rAF loop: detect hand -> count steps -> stash for the renderer. */
   const runTrackingLoop = useCallback(() => {
@@ -120,7 +124,7 @@ export function useFingerSprint() {
     setPhase("ready");
   }, [startWebcam, runTrackingLoop, runSendLoop]);
 
-  /** Finalize the round once the server reports `finished`. */
+  /** Finalize the round once the server reports `finished` (or the socket died). */
   const finishRound = useCallback(async (sessionId: string) => {
     if (finishingRef.current) return;
     finishingRef.current = true;
@@ -129,21 +133,28 @@ export function useFingerSprint() {
     try {
       const final = await endSession(sessionId);
       setResult(final);
+      setDisconnected(false);
+      setPhase("finished");
     } catch (e) {
+      // If finalize fails too (backend died with the socket), a fabricated
+      // 0-score results screen would be a lie — surface the error screen.
       setError((e as Error).message);
+      setDisconnected(false);
+      setPhase("error");
     }
-    setPhase("finished");
   }, []);
 
   /** Create a session, open the socket, begin a round. */
   const startRound = useCallback(async () => {
-    if (phase !== "ready") return;
+    if (phase !== "ready" || startingRef.current) return;
+    startingRef.current = true;
     setError(null);
     setResult(null);
     setGameState(null);
     setDisconnected(false);
     gameStateRef.current = null;
     finishingRef.current = false;
+    if (disconnectTimerRef.current) clearTimeout(disconnectTimerRef.current);
     legTrackerRef.current.reset();
     stepCounterRef.current.reset();
     try {
@@ -152,6 +163,7 @@ export function useFingerSprint() {
       const conn = new GameConnection(
         created.sessionId,
         (state) => {
+          if (connectionRef.current !== conn) return; // stale round
           gameStateRef.current = state;
           setGameState(state);
           if (state.finished) void finishRound(created.sessionId);
@@ -159,20 +171,24 @@ export function useFingerSprint() {
         // Abnormal mid-round close (WiFi blip, backend restart): never a
         // silent freeze — show the "lost the thread" notice briefly, then
         // wrap up through the normal REST finalize path (eng review T10).
+        // Guards: only fires post-open (gameClient), only for the live round.
         () => {
-          if (finishingRef.current) return; // normal teardown
+          if (connectionRef.current !== conn || finishingRef.current) return;
           setDisconnected(true);
-          setTimeout(() => {
+          disconnectTimerRef.current = setTimeout(() => {
             void finishRound(created.sessionId);
           }, DISCONNECT_NOTICE_MS);
         },
       );
+      connectionRef.current = conn; // before connect: identity guard is live from the first event
       await conn.connect();
-      connectionRef.current = conn;
       setPhase("playing");
     } catch (e) {
+      connectionRef.current = null;
       setError(`could not start the round. ${(e as Error).message ?? ""}`.trim());
       setPhase("ready");
+    } finally {
+      startingRef.current = false;
     }
   }, [phase, finishRound]);
 
@@ -191,6 +207,7 @@ export function useFingerSprint() {
     setResult(null);
     setGameState(null);
     setDisconnected(false);
+    if (disconnectTimerRef.current) clearTimeout(disconnectTimerRef.current);
     gameStateRef.current = null;
     finishingRef.current = false;
     legTrackerRef.current.reset();
@@ -201,8 +218,10 @@ export function useFingerSprint() {
   // Tear everything down on unmount.
   useEffect(() => {
     return () => {
+      finishingRef.current = true; // teardown close is never "abnormal"
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (sendTimerRef.current) clearInterval(sendTimerRef.current);
+      if (disconnectTimerRef.current) clearTimeout(disconnectTimerRef.current);
       connectionRef.current?.close();
       trackerRef.current?.close();
       stopWebcam();

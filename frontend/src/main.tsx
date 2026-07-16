@@ -18,7 +18,9 @@ function applyGrain() {
   }
 }
 applyGrain();
-window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener("change", applyGrain);
+// Optional-chained end to end: matchMedia may be absent, and old Safari MQLs
+// lack addEventListener — grain then simply doesn't live-switch with the OS.
+window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", applyGrain);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
