@@ -85,8 +85,11 @@ describe("variant generators", () => {
 });
 
 describe("palettes", () => {
-  it("both palettes share the single signal red", () => {
-    expect(PAPER_PALETTE.signal).toBe(MIDNIGHT_PALETTE.signal);
+  it("each palette carries its scheme's signal red (midnight is lightened for AA contrast)", () => {
+    // Same red concept, different hex: #C0392B is ~3.5:1 on midnight paper,
+    // so dark mode uses #E25B4D (>=4.5:1) — must stay in sync with styles.css.
+    expect(PAPER_PALETTE.signal).toBe("#C0392B");
+    expect(MIDNIGHT_PALETTE.signal).toBe("#E25B4D");
   });
 
   it("withAlpha produces valid rgba from hex", () => {

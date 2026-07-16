@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { PAPER_PALETTE } from "./ink";
-import { renderGame, SCENE_H, SCENE_W, type RenderInput } from "./renderGame";
+import { drawHandOverlay, renderGame, SCENE_H, SCENE_W, type RenderInput } from "./renderGame";
 import type { StateMessage } from "@finger-sprint/shared";
+import type { Landmark } from "../game/handTracker";
 
 /**
  * The renderer is pure — feed it a recording ctx stub and assert on the calls.
@@ -26,6 +27,7 @@ function makeCtx() {
     strokeStyle: "",
     lineWidth: 0,
     lineCap: "butt",
+    clearRect: record("clearRect"),
     fillRect: record("fillRect"),
     beginPath: record("beginPath"),
     moveTo: record("moveTo"),
@@ -127,6 +129,25 @@ describe("renderGame", () => {
     expect(lines(c.calls)).not.toBe(lines(d.calls));
   });
 
+  it("blits all three tile layers with parallax scroll offsets", () => {
+    const layer = (period: number, parallax: number) => ({
+      canvases: [
+        { width: 1600, height: 540 },
+        { width: 1600, height: 540 },
+        { width: 1600, height: 540 },
+      ] as unknown as HTMLCanvasElement[],
+      period,
+      parallax,
+    });
+    const tiles = { far: layer(320, 0.12), near: layer(480, 0.25), ground: layer(120, 1), pixelScale: 1 };
+    const { ctx, calls } = makeCtx();
+    renderGame(ctx, input({ tiles, state: { ...state, distance: 100 }, reducedMotion: true }));
+    const blits = calls.filter((c) => c.method === "drawImage");
+    expect(blits).toHaveLength(3);
+    // ground: scroll = (100 * 1 * 0.7) % 120 = 70 -> x = -120 - 70
+    expect(blits[2].args[1]).toBeCloseTo(-190);
+  });
+
   it("skips the finish line when it is far off screen", () => {
     const { ctx, calls } = makeCtx();
     renderGame(ctx, input({ state: { ...state, distance: 0 }, trackLength: 100_000 }));
@@ -138,5 +159,29 @@ describe("renderGame", () => {
     renderGame(visible.ctx, input({ state: { ...state, distance: 900 }, trackLength: 1000 }));
     const closedPaths = (cs: Call[]) => cs.filter((c) => c.method === "closePath").length;
     expect(closedPaths(visible.calls)).toBeGreaterThan(closedPaths(calls));
+  });
+});
+
+describe("drawHandOverlay", () => {
+  const lm = (n: number): Landmark[] =>
+    Array.from({ length: n }, (_, i) => ({ x: i / 21, y: 0.5, z: 0 }));
+
+  it("clears and bails on null or short landmark arrays (guard both paths)", () => {
+    const { ctx, calls } = makeCtx();
+    drawHandOverlay(ctx, 220, 165, null);
+    drawHandOverlay(ctx, 220, 165, lm(20));
+    expect(calls.filter((c) => c.method === "clearRect")).toHaveLength(2);
+    expect(calls.some((c) => c.method === "stroke")).toBe(false);
+  });
+
+  it("draws mirrored bones and two fingertip dots for a full hand", () => {
+    const { ctx, calls } = makeCtx();
+    drawHandOverlay(ctx, 220, 165, lm(21));
+    expect(calls.filter((c) => c.method === "stroke").length).toBeGreaterThan(0);
+    // index + middle tips, each a fill()ed dot
+    expect(calls.filter((c) => c.method === "fill").length).toBe(2);
+    // mirror: landmark x=0 must land at canvas x=width
+    const xs = calls.filter((c) => c.method === "moveTo").map((c) => c.args[0] as number);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(220);
   });
 });

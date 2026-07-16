@@ -215,7 +215,11 @@ export function useFingerSprint() {
     setPhase("ready");
   }, []);
 
-  // Tear everything down on unmount.
+  // Tear everything down on unmount — and ONLY on unmount. The cleanup does a
+  // full engine teardown, so it must never fire on dependency identity churn;
+  // stopWebcam is read through a ref to keep the dependency array empty.
+  const stopWebcamRef = useRef(stopWebcam);
+  stopWebcamRef.current = stopWebcam;
   useEffect(() => {
     return () => {
       finishingRef.current = true; // teardown close is never "abnormal"
@@ -224,9 +228,9 @@ export function useFingerSprint() {
       if (disconnectTimerRef.current) clearTimeout(disconnectTimerRef.current);
       connectionRef.current?.close();
       trackerRef.current?.close();
-      stopWebcam();
+      stopWebcamRef.current();
     };
-  }, [stopWebcam]);
+  }, []);
 
   return {
     // lifecycle
