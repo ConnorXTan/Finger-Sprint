@@ -47,17 +47,17 @@ export function Hud({
         <span className="hud__distance">
           {distance}m / {trackLength}m
         </span>
+        {/* Anchored to the score block so numeral width can't detach it. */}
+        {comboActive && (
+          <div className="hud__combo">
+            <InkStamp
+              value={`×${multiplier.toFixed(1)}`}
+              label={COPY.hud.combo}
+              slamKey={Math.floor(multiplier)}
+            />
+          </div>
+        )}
       </div>
-
-      {comboActive && (
-        <div className="hud__combo">
-          <InkStamp
-            value={`×${multiplier.toFixed(1)}`}
-            label={COPY.hud.combo}
-            slamKey={Math.floor(multiplier)}
-          />
-        </div>
-      )}
 
       <div className="hud__pace boil-jitter">
         <PaceGauge speed={speed} />

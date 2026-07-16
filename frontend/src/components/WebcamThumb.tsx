@@ -4,6 +4,7 @@ import type { Landmark } from "../game/handTracker";
 import { MIDNIGHT_PALETTE, PAPER_PALETTE } from "../render/ink";
 import { COPY } from "../copy";
 import { THUMB_BORDER } from "../render/inkSvg";
+import { BorderSvg } from "./InkChrome";
 
 /**
  * Small selfie-view webcam preview, sketch-framed, with the live hand drawn as
@@ -24,40 +25,40 @@ export function WebcamThumb({
   const height = Math.round((width * 3) / 4);
 
   useEffect(() => {
+    // Created once, read per frame — a fresh matchMedia per rAF allocates a
+    // MediaQueryList 60x/sec for nothing.
+    const dm = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const dpr = window.devicePixelRatio || 1;
+    let lastDrawn: Landmark[] | null | undefined; // undefined = never drawn
+
     let raf = 0;
     const draw = () => {
-      const canvas = canvasRef.current;
-      const ctx = canvas?.getContext("2d");
-      if (canvas && ctx) {
-        const dark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
-        drawHandOverlay(
-          ctx,
-          canvas.width,
-          canvas.height,
-          landmarksRef.current,
-          dark ? MIDNIGHT_PALETTE : PAPER_PALETTE,
-        );
-      }
       raf = requestAnimationFrame(draw);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const landmarks = landmarksRef.current;
+      if (landmarks === lastDrawn) return; // tracker hasn't produced a new frame
+      lastDrawn = landmarks;
+      // DPR-aware backing store so the ink contours stay crisp on retina.
+      const w = Math.round(canvas.clientWidth * dpr) || width * dpr;
+      const h = Math.round(canvas.clientHeight * dpr) || height * dpr;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      drawHandOverlay(ctx, w, h, landmarks, dm?.matches ? MIDNIGHT_PALETTE : PAPER_PALETTE);
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [landmarksRef]);
+  }, [landmarksRef, width, height]);
 
   return (
     <div className="webcam-thumb" style={{ width, height }}>
-      <svg
-        className="ink-border"
-        viewBox={THUMB_BORDER.viewBox}
-        preserveAspectRatio="none"
-        aria-hidden
-      >
-        {THUMB_BORDER.paths.map((d, i) => (
-          <path key={i} className="ink-border__stroke" d={d} />
-        ))}
-      </svg>
+      <BorderSvg border={THUMB_BORDER} />
       <video ref={videoRef} className="webcam-thumb__video" playsInline muted />
-      <canvas ref={canvasRef} width={width} height={height} className="webcam-thumb__overlay" />
+      <canvas ref={canvasRef} className="webcam-thumb__overlay" />
       <span className="webcam-thumb__caption">{COPY.thumb.caption}</span>
     </div>
   );

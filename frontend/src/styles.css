@@ -28,6 +28,7 @@
     --paper: #12100c;
     --ink: #ede9e0;
     --ink-muted: #a09a8e;
+    --signal: #e25b4d; /* same red concept, >=4.5:1 on midnight paper */
   }
 }
 
@@ -370,7 +371,7 @@ h2 {
 @media (prefers-reduced-motion: reduce) {
   /* Never a frozen full spinner: pin frame 0, pulse the dots' opacity. */
   .ink-spinner__frame {
-    animation: none !important;
+    animation: none;
     opacity: 0;
   }
   .ink-spinner__frame--0 {
@@ -419,7 +420,7 @@ h2 {
 }
 .ink-stamp__label {
   font-family: var(--font-print);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
@@ -449,13 +450,24 @@ h2 {
 
 .howto-toggle {
   font-family: var(--font-print);
-  font-size: 15px;
+  font-size: 16px;
   color: var(--ink-muted);
   background: none;
   border: none;
-  padding: 4px 0;
+  padding: 4px 8px 4px 0;
+  min-height: 44px; /* touch target floor */
   cursor: pointer;
   text-align: left;
+}
+.howto-toggle:hover {
+  color: var(--ink);
+}
+.howto-toggle:active {
+  transform: translate(1px, 1px);
+}
+.howto-toggle:focus-visible {
+  outline: none;
+  text-decoration: underline wavy 1.5px;
 }
 .howto-toggle::before {
   content: "› ";
@@ -471,7 +483,7 @@ h2 {
   margin: 0;
 }
 .trust-line {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--ink-muted);
   margin: 6px 0 0;
 }
@@ -554,7 +566,7 @@ h2 {
 .leaderboard__gap {
   padding: 2px 6px 0 56px;
   color: var(--ink-muted);
-  font-size: 14px;
+  font-size: 16px;
   letter-spacing: 2px;
 }
 /* Empty state: a feature, not a shrug. */
@@ -640,16 +652,17 @@ h2 {
   justify-items: end;
   text-align: right;
 }
+/* The combo stamp overlaps the score block's lower-left corner — anchored to
+   the block itself so numeral width changes can't detach it. */
+.hud__score .hud__combo {
+  position: absolute;
+  bottom: -8px;
+  left: -104px;
+}
 .hud__distance {
   font-family: var(--font-hand);
   font-size: clamp(16px, 2vw, 20px);
   color: var(--ink-muted);
-}
-/* The combo stamp overlaps the score block's lower-left corner. */
-.hud__combo {
-  position: absolute;
-  top: 84px;
-  right: calc(5% + 150px);
 }
 .hud__pace {
   position: absolute;
@@ -664,7 +677,7 @@ h2 {
   height: 66px;
 }
 .hud__pace-gauge .gauge-track {
-  stroke: color-mix(in srgb, var(--ink) 35%, transparent);
+  stroke: color-mix(in srgb, var(--ink) 28%, transparent);
   stroke-width: 1.5;
   fill: none;
 }
@@ -681,13 +694,13 @@ h2 {
   font-size: 24px;
   fill: var(--ink);
 }
-.hud__pace-label {
+.hud__pace-gauge text.hud__pace-label {
   text-anchor: middle;
-  font-family: var(--font-print) !important;
-  font-size: 10px !important;
-  font-weight: 400 !important;
+  font-family: var(--font-print);
+  font-size: 13px;
+  font-weight: 400;
   letter-spacing: 2px;
-  fill: var(--ink-muted) !important;
+  fill: var(--ink-muted);
 }
 .hud__steps {
   color: var(--ink-muted);
@@ -754,7 +767,9 @@ h2 {
   to { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .fade-in-late {
+  .fade-in-late,
+  .leaderboard__row.is-highlight,
+  .coaching {
     animation: none;
   }
 }
@@ -824,10 +839,12 @@ h2 {
 }
 .webcam-thumb__caption {
   position: absolute;
-  bottom: -20px;
+  bottom: -22px;
   width: 100%;
   text-align: center;
-  font-size: 12px;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--ink-muted);
 }
 

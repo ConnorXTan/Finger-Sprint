@@ -84,7 +84,15 @@ camera — video never leaves your device."
   canvas boils, the DOM does not. Sole exception: the loading spinner (3
   pre-rendered SVG frames cycled ~10Hz).
 - `prefers-reduced-motion: reduce` → boil freezes on variant 0 (scene stays
-  fully ink, nothing jitters).
+  fully ink, nothing jitters). Exception: the loading spinner's ellipsis dots
+  pulse opacity under reduced motion — a fully frozen spinner reads as a hang,
+  and opacity change is not motion.
+- Blessed boil-jitter DOM exceptions: the loading spinner, the play HUD
+  overlay, and the calibration step counter (specced as "big boiled step
+  counter" in the design doc). Nothing else in the DOM boils.
+- Scroll-tile periodicity is a hard rule: any seed or jitter index used while
+  drawing a tile must derive from `x % period`, or strokes visibly reshape at
+  every scroll wrap.
 
 ## Interaction states
 

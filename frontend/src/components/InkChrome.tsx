@@ -25,7 +25,7 @@ export function InkFrame({ className }: { className?: string }) {
   return <BorderSvg border={PANEL_BORDER} className={className} />;
 }
 
-function BorderSvg({ border, className }: { border: InkBorder; className?: string }) {
+export function BorderSvg({ border, className }: { border: InkBorder; className?: string }) {
   return (
     <svg
       className={`ink-border ${className ?? ""}`}

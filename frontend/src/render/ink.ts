@@ -39,12 +39,16 @@ export const PAPER_PALETTE: InkPalette = {
   grain: "light",
 };
 
-/** prefers-color-scheme: dark — midnight ink (same red). */
+/**
+ * prefers-color-scheme: dark — midnight ink. The signal red lightens to keep
+ * small red text (own leaderboard row, stamp labels) at >=4.5:1 on midnight
+ * paper; same red concept, AA-compliant. Must match styles.css dark tokens.
+ */
 export const MIDNIGHT_PALETTE: InkPalette = {
   paper: "#12100C",
   ink: "#EDE9E0",
   inkMuted: "#A09A8E",
-  signal: "#C0392B",
+  signal: "#E25B4D",
   grain: "dark",
 };
 
