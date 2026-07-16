@@ -11,6 +11,7 @@ import {
   InkButton,
   InkCheck,
   InkErrorLine,
+  InkFrame,
   InkPanel,
   InkSpinner,
   InkStamp,
@@ -79,6 +80,7 @@ function HomeScreen({ engine, lbKey }: { engine: FingerSprintEngine; lbKey: numb
           trackLength={1000}
           mode="idle"
         />
+        <InkFrame />
       </div>
 
       <div className="home-strip">
@@ -225,6 +227,7 @@ function PlayScreen({ engine }: { engine: FingerSprintEngine }) {
           trackLength={trackLength}
           disconnected={engine.disconnected}
         />
+        <InkFrame />
       </div>
     </div>
   );

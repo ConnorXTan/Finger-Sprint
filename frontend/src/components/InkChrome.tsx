@@ -20,6 +20,11 @@ import {
  * only exception is the spinner, cycled by pure CSS.
  */
 
+/** Standalone sketch frame — used by the stage around the game canvas. */
+export function InkFrame({ className }: { className?: string }) {
+  return <BorderSvg border={PANEL_BORDER} className={className} />;
+}
+
 function BorderSvg({ border, className }: { border: InkBorder; className?: string }) {
   return (
     <svg

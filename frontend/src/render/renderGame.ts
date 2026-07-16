@@ -69,7 +69,7 @@ export function buildSceneTiles(palette: InkPalette, pixelScale: number): SceneT
     far: buildHillLayer(palette, pixelScale, {
       period: 320,
       parallax: 0.12,
-      baseY: groundY - 46,
+      baseY: groundY - 110, // bezier apex lands halfway to the control point
       groundY,
       color: withAlpha(palette.ink, 0.28),
       width: 1.4,
@@ -78,7 +78,7 @@ export function buildSceneTiles(palette: InkPalette, pixelScale: number): SceneT
     near: buildHillLayer(palette, pixelScale, {
       period: 480,
       parallax: 0.25,
-      baseY: groundY - 16,
+      baseY: groundY - 52,
       groundY,
       color: withAlpha(palette.ink, 0.55),
       width: 1.8,
@@ -121,6 +121,9 @@ function buildHillLayer(
     const tileW = SCENE_W + 2 * cfg.period;
     const humpW = cfg.period / 2; // one hump per half-period -> seamless loop
     for (let x = 0; x < tileW; x += humpW) {
+      // Vary each hump's apex (period-repeating) so the ridge reads organic.
+      const humpIndex = Math.round(x / humpW) % 2;
+      const apexY = cfg.baseY + hashJitter(humpIndex, v, 19) * (cfg.groundY - cfg.baseY) * 0.3;
       // Sample the quadratic hump into a polyline for rough's linearPath
       // (device-pixel coordinates — rough draws unscaled on this canvas).
       const pts: [number, number][] = [];
@@ -128,7 +131,7 @@ function buildHillLayer(
         const t = i / 8;
         const px = (x + t * humpW) * pixelScale;
         const py =
-          ((1 - t) * (1 - t) * cfg.groundY + 2 * (1 - t) * t * cfg.baseY + t * t * cfg.groundY) *
+          ((1 - t) * (1 - t) * cfg.groundY + 2 * (1 - t) * t * apexY + t * t * cfg.groundY) *
           pixelScale;
         pts.push([px, py]);
       }
@@ -264,7 +267,13 @@ export function renderGame(ctx: CanvasRenderingContext2D, input: RenderInput): v
     blitTile(ctx, tiles.ground, frame, distance, tiles.pixelScale);
   }
 
-  drawFinishLine(ctx, palette, frame, runnerX, groundY, distance, trackLength);
+  // Idle: the finish flag sits at a fixed "far distance" spot so it's never
+  // half-clipped by the canvas edge; play: real world position.
+  const finishScreenX =
+    mode === "idle"
+      ? SCENE_W * 0.88
+      : runnerX + (trackLength - distance) * PX_PER_UNIT;
+  drawFinishLine(ctx, palette, frame, finishScreenX, groundY);
   drawRunner(ctx, palette, frame, runnerX, groundY, speed, nowMs, mode, legPose);
   if (mode === "play") drawProgressLine(ctx, palette, frame, position);
 }
@@ -275,12 +284,9 @@ function drawFinishLine(
   ctx: CanvasRenderingContext2D,
   palette: InkPalette,
   frame: number,
-  runnerX: number,
+  screenX: number,
   groundY: number,
-  distance: number,
-  trackLength: number,
 ): void {
-  const screenX = runnerX + (trackLength - distance) * PX_PER_UNIT;
   if (screenX < -40 || screenX > SCENE_W + 60) return;
 
   const top = groundY - 150;
@@ -321,9 +327,9 @@ function drawRunner(
   let bob: number;
 
   if (mode === "idle") {
-    // Standing at the start line: relaxed stance, a slow breathing bob.
-    legFront = 0.18;
-    legBack = -0.12;
+    // Standing at the start line: a readable ready-stance, slow breathing bob.
+    legFront = 0.8;
+    legBack = -0.7;
     bob = Math.sin(nowMs / 900) * 1.5;
   } else if (legPose) {
     legFront = legPose.index;
@@ -377,7 +383,7 @@ function drawRunner(
     }
   }
 
-  drawRunnerFigure(ctx, palette.ink, frame, x, baseY, legFront, legBack);
+  drawRunnerFigure(ctx, palette.ink, frame, x, baseY, legFront, legBack, mode === "idle");
 }
 
 /** The stick figure itself — all stroke, hand-drawn head circle. */
@@ -389,6 +395,7 @@ function drawRunnerFigure(
   baseY: number,
   legFront: number,
   legBack: number,
+  standing = false,
 ): void {
   ctx.save();
   ctx.translate(x, baseY);
@@ -399,9 +406,15 @@ function drawRunnerFigure(
   leg(ctx, legBack, frame, 31);
   leg(ctx, legFront, frame, 37);
 
+  // Standing: arms hang loose. Running: arms counter-swing the legs.
   ctx.lineWidth = 4;
-  arm(ctx, -legBack, frame, 41);
-  arm(ctx, -legFront, frame, 43);
+  if (standing) {
+    arm(ctx, 0.18, frame, 41);
+    arm(ctx, -0.14, frame, 43);
+  } else {
+    arm(ctx, -legBack, frame, 41);
+    arm(ctx, -legFront, frame, 43);
+  }
 
   // Torso.
   ctx.lineWidth = 5;
