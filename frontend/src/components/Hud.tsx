@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { StateMessage } from "@finger-sprint/shared";
 import { COPY } from "../copy";
 import { InkStamp } from "./InkChrome";
@@ -65,11 +66,25 @@ export function Hud({
 
       {disconnected && <div className="hud__notice">{COPY.play.disconnected}</div>}
 
-      {/* Screen-reader mirror: in-stage text is decorative/visual; this is the
-          accessible HUD. Time announced at 10s granularity to avoid chatter. */}
-      <div className="visually-hidden" aria-live="polite">
-        {`${Math.ceil(timeSec / 10) * 10} seconds left, score ${score}`}
-      </div>
+      <LiveMirror timeSec={timeSec} score={score} />
+    </div>
+  );
+}
+
+/**
+ * Screen-reader mirror: in-stage text is decorative/visual; this is the
+ * accessible HUD. The string changes ONLY on 10s time-bucket transitions —
+ * interpolating the raw score would mutate the live region on every server
+ * tick and make screen readers announce continuously.
+ */
+function LiveMirror({ timeSec, score }: { timeSec: number; score: number }) {
+  const bucket = Math.ceil(timeSec / 10) * 10;
+  // Capture the score as of the bucket transition; ignore ticks in between.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const announced = useMemo(() => `${bucket} seconds left, score ${score}`, [bucket]);
+  return (
+    <div className="visually-hidden" aria-live="polite">
+      {announced}
     </div>
   );
 }

@@ -29,10 +29,21 @@ describe("Hud (CRITICAL five-field regression)", () => {
   it("renders time, score, distance, steps, and combo from a StateMessage", () => {
     render(<Hud state={state} trackLength={500} />);
     expect(screen.getByText("0:42")).toBeTruthy(); // time
-    expect(screen.getByText("1,240")).toBeTruthy(); // score (the hero)
+    // Locale-safe: assert with the same formatter the component uses.
+    expect(screen.getByText((1240).toLocaleString())).toBeTruthy(); // score (the hero)
     expect(screen.getByText("312m / 500m")).toBeTruthy(); // distance
     expect(screen.getByText("184 steps")).toBeTruthy(); // steps
     expect(screen.getByText("×3.1")).toBeTruthy(); // combo stamp
+  });
+
+  it("formats times over a minute with zero-padded seconds", () => {
+    render(<Hud state={{ ...state, timeRemaining: 65_000 }} trackLength={500} />);
+    expect(screen.getByText("1:05")).toBeTruthy();
+  });
+
+  it("formats the exact-minute boundary", () => {
+    render(<Hud state={{ ...state, timeRemaining: 60_000 }} trackLength={500} />);
+    expect(screen.getByText("1:00")).toBeTruthy();
   });
 
   it("zeroes the HUD before the first server state arrives (state: null)", () => {
@@ -57,6 +68,19 @@ describe("Hud (CRITICAL five-field regression)", () => {
     const { container } = render(<Hud state={state} trackLength={500} />);
     const live = container.querySelector("[aria-live=polite]");
     expect(live?.textContent).toContain("score 1240");
+  });
+
+  it("keeps the live region stable across score ticks within a time bucket", () => {
+    // Regression: ISSUE-002 — raw score in aria-live announced every server tick.
+    // Found by /qa on 2026-07-16
+    const { container, rerender } = render(<Hud state={state} trackLength={500} />);
+    const live = () => container.querySelector("[aria-live=polite]")?.textContent;
+    const before = live();
+    rerender(<Hud state={{ ...state, score: 1249, timeRemaining: 41_000 }} trackLength={500} />);
+    expect(live()).toBe(before); // same 10s bucket -> no new announcement
+    rerender(<Hud state={{ ...state, score: 1300, timeRemaining: 39_000 }} trackLength={500} />);
+    expect(live()).toContain("40 seconds left"); // bucket transition announces
+    expect(live()).toContain("score 1300");
   });
 });
 
