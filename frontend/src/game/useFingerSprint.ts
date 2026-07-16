@@ -22,6 +22,9 @@ import { createSession, endSession, GameConnection, submitScore } from "../net/g
  */
 export type GamePhase = "idle" | "loading" | "ready" | "playing" | "finished" | "error";
 
+/** How long the in-stage "lost the thread" notice shows before finalizing. */
+export const DISCONNECT_NOTICE_MS = 1500;
+
 /**
  * The whole client engine in one hook. Owns the tracking loop, the fixed-rate
  * metric sender, and the lifecycle (prepare -> round -> finish -> submit).
@@ -39,6 +42,8 @@ export function useFingerSprint() {
   const [error, setError] = useState<string | null>(null);
   const [steps, setSteps] = useState(0);
   const [handDetected, setHandDetected] = useState(false);
+  /** True while an abnormal mid-round socket close is being wrapped up. */
+  const [disconnected, setDisconnected] = useState(false);
   const [gameState, setGameState] = useState<StateMessage | null>(null);
   const [session, setSession] = useState<CreateSessionResponse | null>(null);
   const [result, setResult] = useState<EndSessionResponse | null>(null);
@@ -136,6 +141,7 @@ export function useFingerSprint() {
     setError(null);
     setResult(null);
     setGameState(null);
+    setDisconnected(false);
     gameStateRef.current = null;
     finishingRef.current = false;
     legTrackerRef.current.reset();
@@ -143,16 +149,29 @@ export function useFingerSprint() {
     try {
       const created = await createSession();
       setSession(created);
-      const conn = new GameConnection(created.sessionId, (state) => {
-        gameStateRef.current = state;
-        setGameState(state);
-        if (state.finished) void finishRound(created.sessionId);
-      });
+      const conn = new GameConnection(
+        created.sessionId,
+        (state) => {
+          gameStateRef.current = state;
+          setGameState(state);
+          if (state.finished) void finishRound(created.sessionId);
+        },
+        // Abnormal mid-round close (WiFi blip, backend restart): never a
+        // silent freeze — show the "lost the thread" notice briefly, then
+        // wrap up through the normal REST finalize path (eng review T10).
+        () => {
+          if (finishingRef.current) return; // normal teardown
+          setDisconnected(true);
+          setTimeout(() => {
+            void finishRound(created.sessionId);
+          }, DISCONNECT_NOTICE_MS);
+        },
+      );
       await conn.connect();
       connectionRef.current = conn;
       setPhase("playing");
     } catch (e) {
-      setError(`Could not start the round. ${(e as Error).message ?? ""}`.trim());
+      setError(`could not start the round. ${(e as Error).message ?? ""}`.trim());
       setPhase("ready");
     }
   }, [phase, finishRound]);
@@ -171,6 +190,7 @@ export function useFingerSprint() {
   const playAgain = useCallback(() => {
     setResult(null);
     setGameState(null);
+    setDisconnected(false);
     gameStateRef.current = null;
     finishingRef.current = false;
     legTrackerRef.current.reset();
@@ -199,6 +219,7 @@ export function useFingerSprint() {
     // data for the UI
     steps,
     handDetected,
+    disconnected,
     gameState,
     session,
     result,

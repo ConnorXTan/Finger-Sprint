@@ -1,60 +1,114 @@
 import type { StateMessage } from "@finger-sprint/shared";
+import { COPY } from "../copy";
+import { InkStamp } from "./InkChrome";
 
-/** Overlay HUD: timer, score, distance, and the flat step count. */
+/**
+ * The diegetic HUD — a DOM overlay in the ink language (DESIGN.md → Play HUD
+ * slots). Score is the top-right hero (the game ranks by score); the red combo
+ * stamp overlaps the score block; distance rides beneath; the pace gauge +
+ * steps sit bottom-left. Numerals boil via the CSS `.boil-jitter` clock.
+ *
+ *   ┌───────────────────────── stage ─────────────────────────┐
+ *   │ 0:42            ·· progress line ··          1,240 [×3] │
+ *   │ TIME LEFT                                    SCORE      │
+ *   │                                              312m/500m  │
+ *   │                 (runner band — canvas)                  │
+ *   │ (pace 67) 184 steps                        [your hand]  │
+ *   └──────────────────────────────────────────────────────────┘
+ */
 export function Hud({
   state,
-  steps,
   trackLength,
+  disconnected,
 }: {
   state: StateMessage | null;
-  /** Local (client-side) step count — shown until the server state arrives. */
-  steps: number;
   trackLength: number;
+  disconnected?: boolean;
 }) {
   const timeSec = state ? Math.ceil(state.timeRemaining / 1000) : 0;
   const distance = state?.distance ?? 0;
   const score = state?.score ?? 0;
+  const steps = state?.steps ?? 0;
+  const speed = state?.speed ?? 0;
   const multiplier = state?.multiplier ?? 1;
   const comboActive = multiplier > 1;
-  // The server's accepted step count is authoritative during a round.
-  const shownSteps = state?.steps ?? steps;
 
   return (
     <div className="hud">
-      <div className="hud__top">
-        <Stat label="Time" value={`${timeSec}s`} big accent={timeSec <= 5} />
-        {comboActive && (
-          <div className="combo" key={Math.floor(multiplier)}>
-            <span className="combo__x">×{multiplier.toFixed(1)}</span>
-            <span className="combo__label">combo</span>
-          </div>
-        )}
-        <Stat label="Score" value={score.toLocaleString()} big />
+      <div className="hud__time boil-jitter">
+        <span className="hud__numeral">{formatTime(timeSec)}</span>
+        <span className="label">{COPY.hud.time}</span>
       </div>
 
-      <div className="hud__row">
-        <Stat label="Distance" value={`${distance} / ${trackLength}`} />
-        <Stat label="Steps" value={`${shownSteps}`} />
+      <div className="hud__score boil-jitter">
+        <span className="hud__numeral">{score.toLocaleString()}</span>
+        <span className="label">{COPY.hud.score}</span>
+        <span className="hud__distance">
+          {distance}m / {trackLength}m
+        </span>
+      </div>
+
+      {comboActive && (
+        <div className="hud__combo">
+          <InkStamp
+            value={`×${multiplier.toFixed(1)}`}
+            label={COPY.hud.combo}
+            slamKey={Math.floor(multiplier)}
+          />
+        </div>
+      )}
+
+      <div className="hud__pace boil-jitter">
+        <PaceGauge speed={speed} />
+        <span className="hud__steps">{COPY.hud.steps(steps)}</span>
+      </div>
+
+      {disconnected && <div className="hud__notice">{COPY.play.disconnected}</div>}
+
+      {/* Screen-reader mirror: in-stage text is decorative/visual; this is the
+          accessible HUD. Time announced at 10s granularity to avoid chatter. */}
+      <div className="visually-hidden" aria-live="polite">
+        {`${Math.ceil(timeSec / 10) * 10} seconds left, score ${score}`}
       </div>
     </div>
   );
 }
 
-function Stat({
-  label,
-  value,
-  big,
-  accent,
-}: {
-  label: string;
-  value: string;
-  big?: boolean;
-  accent?: boolean;
-}) {
+function formatTime(totalSec: number): string {
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/**
+ * 180° ink arc; fill = clamp(speed / softMax, 0, 1). softMax starts at 60
+ * units/s (tune from real play — DESIGN.md → Ink Kernel Constants).
+ */
+export const PACE_SOFT_MAX = 60;
+
+export function paceFill(speed: number, softMax: number = PACE_SOFT_MAX): number {
+  return Math.max(0, Math.min(1, speed / softMax));
+}
+
+function PaceGauge({ speed }: { speed: number }) {
+  const fill = paceFill(speed);
+  // Half-circle arc, r=50, center (62,58) in a 124x66 viewBox.
+  const arcLen = Math.PI * 50;
   return (
-    <div className={`stat${big ? " stat--big" : ""}${accent ? " stat--accent" : ""}`}>
-      <span className="stat__label">{label}</span>
-      <span className="stat__value">{value}</span>
-    </div>
+    <svg className="hud__pace-gauge" viewBox="0 0 124 66" aria-hidden>
+      <path className="gauge-track" d="M 12 58 A 50 50 0 0 1 112 58" />
+      <path
+        className="gauge-fill"
+        d="M 12 58 A 50 50 0 0 1 112 58"
+        strokeDasharray={arcLen}
+        strokeDashoffset={arcLen * (1 - fill)}
+      />
+      <text x="62" y="46" textAnchor="middle">
+        {Math.round(speed)}
+      </text>
+      <text className="hud__pace-label" x="62" y="62">
+        {COPY.hud.pace}
+      </text>
+    </svg>
   );
 }

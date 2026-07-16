@@ -1,27 +1,41 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LeaderboardEntry } from "@finger-sprint/shared";
 import { useFingerSprint, type FingerSprintEngine } from "./game/useFingerSprint";
 import type { WebcamStatus } from "./game/useWebcam";
+import { COPY } from "./copy";
 import { Leaderboard } from "./components/Leaderboard";
 import { WebcamThumb } from "./components/WebcamThumb";
 import { GameView } from "./components/GameView";
 import { Hud } from "./components/Hud";
+import {
+  InkButton,
+  InkCheck,
+  InkErrorLine,
+  InkPanel,
+  InkSpinner,
+  InkStamp,
+  TitleUnderline,
+} from "./components/InkChrome";
+
+/** Practice steps required before the sprint unlocks (calibration gate). */
+export const PRACTICE_STEPS = 3;
+/** Hand seen but no new steps for this long → show the coaching line. */
+const COACHING_AFTER_MS = 3000;
 
 export default function App() {
   const engine = useFingerSprint();
   const { phase } = engine;
 
-  // Bump to force the leaderboard to reload after a submission.
   const [lbKey, setLbKey] = useState(0);
-  const [submittedId, setSubmittedId] = useState<number | undefined>(undefined);
+  const [submitted, setSubmitted] = useState<LeaderboardEntry | undefined>(undefined);
 
   const showThumb = phase === "ready" || phase === "playing" || phase === "finished";
 
   return (
     <div className="app">
-      <h1 className="app__title">
-        Finger&nbsp;Sprint <span className="app__title-emoji">🏃✋</span>
-      </h1>
+      <h1 className="app__title">{COPY.title}</h1>
+      <TitleUnderline />
+      <p className="app__tagline">{COPY.tagline}</p>
 
       {phase === "idle" && <HomeScreen engine={engine} lbKey={lbKey} />}
       {phase === "loading" && <LoadingScreen webcamStatus={engine.webcamStatus} />}
@@ -32,9 +46,9 @@ export default function App() {
         <ResultsScreen
           engine={engine}
           lbKey={lbKey}
-          submittedId={submittedId}
+          submitted={submitted}
           onSubmitted={(entry: LeaderboardEntry) => {
-            setSubmittedId(entry.id);
+            setSubmitted(entry);
             setLbKey((k) => k + 1);
           }}
         />
@@ -54,28 +68,51 @@ export default function App() {
 /* ------------------------------- screens ------------------------------- */
 
 function HomeScreen({ engine, lbKey }: { engine: FingerSprintEngine; lbKey: number }) {
+  const [howtoOpen, setHowtoOpen] = useState(false);
   return (
     <div className="screen screen--home">
-      <div className="panel panel--hero">
-        <p className="lede">
-          "Walk" your index and middle fingers in front of the webcam — like two
-          little legs. A step counts each time your two fingertips cross each
-          other, and every step moves your runner one stride. Rack up the most
-          steps before the timer runs out!
-        </p>
-        <ol className="howto">
-          <li>Allow camera access (video never leaves your device).</li>
-          <li>Hold one hand up so the skeleton appears.</li>
-          <li>
-            Walk your index + middle fingers — a step counts only when the two
-            fingertips cross. 🚶💨
-          </li>
-        </ol>
-        <button className="btn btn--primary btn--lg" onClick={() => void engine.prepare()}>
-          Start
-        </button>
+      {/* The idle ink scene: teaches the aesthetic before play. */}
+      <div className="stage">
+        <GameView
+          gameStateRef={engine.gameStateRef}
+          legPoseRef={engine.legPoseRef}
+          trackLength={1000}
+          mode="idle"
+        />
       </div>
-      <Leaderboard refreshKey={lbKey} />
+
+      <div className="home-strip">
+        <InkPanel>
+          <h2>{COPY.home.heading}</h2>
+          <p className="lede">{COPY.home.lede}</p>
+          <button
+            className="howto-toggle"
+            aria-expanded={howtoOpen}
+            onClick={() => setHowtoOpen((o) => !o)}
+          >
+            {COPY.home.howtoToggle}
+          </button>
+          {howtoOpen && (
+            <ol className="howto">
+              {COPY.home.howto.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ol>
+          )}
+          <div className="start-area">
+            <InkButton primary onClick={() => void engine.prepare()}>
+              {COPY.home.start}
+            </InkButton>
+            <p className="trust-line">{COPY.home.trust}</p>
+          </div>
+          {/* Below 820px the play path is this card, not a broken game. */}
+          <div className="mobile-card">
+            <p className="lede">{COPY.home.mobileCard}</p>
+          </div>
+        </InkPanel>
+
+        <Leaderboard refreshKey={lbKey} />
+      </div>
     </div>
   );
 }
@@ -83,17 +120,18 @@ function HomeScreen({ engine, lbKey }: { engine: FingerSprintEngine; lbKey: numb
 function LoadingScreen({ webcamStatus }: { webcamStatus: WebcamStatus }) {
   const msg =
     webcamStatus === "requesting"
-      ? "Requesting camera access…"
+      ? COPY.loading.requesting
       : webcamStatus === "ready"
-        ? "Loading the hand-tracking model…"
-        : "Getting things ready…";
+        ? COPY.loading.model
+        : COPY.loading.ready;
   return (
     <div className="screen screen--center">
-      <div className="panel">
-        <div className="spinner" aria-hidden />
-        <p className="loading-msg">{msg}</p>
-        <p className="muted">First load downloads the model (~a few MB).</p>
-      </div>
+      <InkPanel center>
+        <InkSpinner />
+        <p>{msg}</p>
+        <p className="muted">{COPY.loading.note}</p>
+        <p className="trust-line">{COPY.home.trust}</p>
+      </InkPanel>
     </div>
   );
 }
@@ -103,48 +141,72 @@ function ErrorScreen({ engine }: { engine: FingerSprintEngine }) {
   const { title, body } = describeError(webcamStatus, webcamError, error);
   return (
     <div className="screen screen--center">
-      <div className="panel">
-        <h2 className="error-title">{title}</h2>
+      <InkPanel center>
+        <h2>{title}</h2>
         <p className="muted">{body}</p>
-        <button className="btn btn--primary" onClick={() => void engine.prepare()}>
-          Try again
-        </button>
-      </div>
+        <InkButton primary onClick={() => void engine.prepare()}>
+          {COPY.errors.retry}
+        </InkButton>
+      </InkPanel>
     </div>
   );
 }
 
 function CalibrationScreen({ engine }: { engine: FingerSprintEngine }) {
   const { steps, handDetected } = engine;
+  const coaching = useCoaching(handDetected, steps);
+  const locked = steps < PRACTICE_STEPS;
+
   return (
     <div className="screen screen--center">
-      <div className="panel panel--calibrate">
-        <h2>Calibration</h2>
+      <InkPanel center>
+        <h2>{COPY.calibrate.heading}</h2>
         <p className="muted">
-          {handDetected
-            ? "Hand detected! A step counts each time your index and middle fingertips cross."
-            : "Hold your hand up to the camera so the skeleton appears."}
+          {handDetected ? COPY.calibrate.handSeen : COPY.calibrate.handPrompt}
         </p>
 
-        <div className={`big-intensity${handDetected ? " is-live" : ""}`}>
-          <span className="big-intensity__value">{steps}</span>
-          <span className="big-intensity__label">steps</span>
+        <div className="big-steps boil-jitter">
+          <span className="big-steps__value">{steps}</span>
+          <span className="label">{COPY.calibrate.stepsLabel}</span>
         </div>
+
+        {coaching && <p className="coaching">{COPY.calibrate.coaching}</p>}
 
         <div className={`detect-badge${handDetected ? " is-on" : ""}`}>
-          {handDetected ? "✋ tracking" : "no hand"}
+          {handDetected ? COPY.calibrate.badgeOn : COPY.calibrate.badgeOff}
         </div>
 
-        <button
-          className="btn btn--primary btn--lg"
-          onClick={() => void engine.startRound()}
-          disabled={!handDetected}
-        >
-          {handDetected ? "Start sprint!" : "Show your hand to start"}
-        </button>
-      </div>
+        <InkButton primary onClick={() => void engine.startRound()} disabled={locked}>
+          {locked ? COPY.calibrate.startLocked(PRACTICE_STEPS - steps) : COPY.calibrate.start}
+        </InkButton>
+      </InkPanel>
     </div>
   );
+}
+
+/**
+ * Coaching state (design doc F6): the hand is tracked but steps aren't
+ * incrementing for a few seconds — the player is holding a static hand and
+ * doesn't know the gesture yet.
+ */
+function useCoaching(handDetected: boolean, steps: number): boolean {
+  const [coaching, setCoaching] = useState(false);
+  const lastStepsRef = useRef(steps);
+
+  useEffect(() => {
+    if (!handDetected) {
+      setCoaching(false);
+      return;
+    }
+    if (steps !== lastStepsRef.current) {
+      lastStepsRef.current = steps;
+      setCoaching(false);
+    }
+    const timer = setTimeout(() => setCoaching(true), COACHING_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [handDetected, steps]);
+
+  return coaching;
 }
 
 function PlayScreen({ engine }: { engine: FingerSprintEngine }) {
@@ -156,8 +218,13 @@ function PlayScreen({ engine }: { engine: FingerSprintEngine }) {
           gameStateRef={engine.gameStateRef}
           legPoseRef={engine.legPoseRef}
           trackLength={trackLength}
+          mode="play"
         />
-        <Hud state={engine.gameState} steps={engine.steps} trackLength={trackLength} />
+        <Hud
+          state={engine.gameState}
+          trackLength={trackLength}
+          disconnected={engine.disconnected}
+        />
       </div>
     </div>
   );
@@ -166,12 +233,12 @@ function PlayScreen({ engine }: { engine: FingerSprintEngine }) {
 function ResultsScreen({
   engine,
   lbKey,
-  submittedId,
+  submitted,
   onSubmitted,
 }: {
   engine: FingerSprintEngine;
   lbKey: number;
-  submittedId: number | undefined;
+  submitted: LeaderboardEntry | undefined;
   onSubmitted: (entry: LeaderboardEntry) => void;
 }) {
   const { result } = engine;
@@ -183,63 +250,126 @@ function ResultsScreen({
   // Win = actually reached the finish line; otherwise the timer ran out.
   const trackLength = engine.session?.trackLength ?? Infinity;
   const reached = (result?.distance ?? 0) >= trackLength;
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name.trim() || submitting) return;
-    setSubmitting(true);
-    setErr(null);
-    try {
-      const entry = await engine.submitName(name.trim());
-      onSubmitted(entry);
-      setDone(true);
-    } catch (e2) {
-      setErr((e2 as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  const score = result?.score ?? 0;
+  const shownScore = useCountUp(score);
 
   return (
     <div className="screen screen--results">
-      <div className="panel panel--results">
-        <h2>{reached ? "Finished! 🎉" : "Time’s up! ⏱️"}</h2>
+      <InkPanel center>
+        <p className="result-outcome">
+          <OutcomeGlyph win={reached} />
+          <span className="hud__numeral" style={{ fontSize: 28 }}>
+            {reached ? COPY.results.win : COPY.results.timeout}
+          </span>
+        </p>
+
         <div className="result-score">
-          <span className="result-score__value">{(result?.score ?? 0).toLocaleString()}</span>
-          <span className="result-score__label">points</span>
+          <span className="result-score__value">{shownScore.toLocaleString()}</span>
+          <span className="label">{COPY.results.pointsLabel}</span>
+          {/* The hanko — the score's seal. Slams once, then sits still. */}
+          <InkStamp className="result-hanko" value="ran" big slamKey={result?.sessionId} />
         </div>
+
         <p className="muted">
-          Distance {result?.distance ?? 0} · provisional rank #{result?.rank ?? "—"}
+          {COPY.results.stats(result?.distance ?? 0, submitted?.rank ?? result?.rank ?? "—")}
         </p>
 
         {!done ? (
-          <form className="submit-form" onSubmit={handleSubmit}>
-            <input
-              className="input"
-              type="text"
-              placeholder="Your name"
-              maxLength={24}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoFocus
-            />
-            <button className="btn btn--primary" type="submit" disabled={submitting || !name.trim()}>
-              {submitting ? "Saving…" : "Submit score"}
-            </button>
+          /* The form arrives AFTER the score has drawn itself on — the player
+             is never dumped straight into a text input at the peak. */
+          <form
+            className="submit-form fade-in-late"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!name.trim() || submitting) return;
+              setSubmitting(true);
+              setErr(null);
+              engine
+                .submitName(name.trim())
+                .then((entry) => {
+                  onSubmitted(entry);
+                  setDone(true);
+                })
+                .catch((e2: Error) => setErr(e2.message))
+                .finally(() => setSubmitting(false));
+            }}
+          >
+            <label className="ink-input-wrap">
+              <span className="label">{COPY.results.nameLabel}</span>
+              <input
+                className="ink-input"
+                type="text"
+                placeholder={COPY.results.namePlaceholder}
+                maxLength={24}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <InkButton primary type="submit" disabled={submitting || !name.trim()}>
+              {submitting ? COPY.results.submitting : COPY.results.submit}
+            </InkButton>
           </form>
         ) : (
-          <p className="success">Saved! You’re on the board. 🏆</p>
+          <p className="success-line">
+            <InkCheck />
+            {COPY.results.saved}
+          </p>
         )}
-        {err && <p className="error">{err}</p>}
+        {err && <InkErrorLine>{err}</InkErrorLine>}
 
-        <button className="btn btn--ghost" onClick={engine.playAgain}>
-          Play again
-        </button>
-      </div>
+        <InkButton onClick={engine.playAgain}>{COPY.results.again}</InkButton>
+      </InkPanel>
 
-      <Leaderboard refreshKey={lbKey} highlightId={submittedId} />
+      <Leaderboard
+        refreshKey={lbKey}
+        highlightId={submitted?.id}
+        pinned={submitted ? { name: submitted.name, score: submitted.score, rank: submitted.rank } : null}
+      />
     </div>
   );
+}
+
+/** Win = the red flag (budgeted mark); timeout = an ink stopwatch. */
+function OutcomeGlyph({ win }: { win: boolean }) {
+  if (win) {
+    return (
+      <svg viewBox="0 0 30 30" aria-hidden>
+        <path className="flag-pole" d="M8 28 L9 3" />
+        <path className="flag-glyph" d="M9 4 L26 9 L9 15 Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 30 30" aria-hidden>
+      <circle className="clock-glyph" cx="15" cy="17" r="11" />
+      <path className="clock-glyph" d="M15 11 L15 17 L20 20" />
+      <path className="clock-glyph" d="M12 3 L18 3" />
+    </svg>
+  );
+}
+
+/**
+ * Payoff choreography: the score writes itself on over ~600ms (respects
+ * prefers-reduced-motion by jumping straight to the final value).
+ */
+function useCountUp(target: number, durationMs = 600): number {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setValue(target);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - start) / durationMs);
+      setValue(Math.round(target * (1 - Math.pow(1 - p, 3)))); // ease-out cubic
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, durationMs]);
+  return value;
 }
 
 /* ------------------------------- helpers ------------------------------- */
@@ -251,29 +381,17 @@ function describeError(
 ): { title: string; body: string } {
   switch (status) {
     case "denied":
-      return {
-        title: "Camera permission denied",
-        body: "Finger Sprint needs your webcam to track hand movement. Enable camera access for this site in your browser settings, then try again.",
-      };
+      return COPY.errors.denied;
     case "notfound":
-      return {
-        title: "No camera found",
-        body: "We couldn’t find a webcam. Plug one in (or enable it) and try again.",
-      };
+      return COPY.errors.notfound;
     case "busy":
-      return {
-        title: "Camera unavailable",
-        body: "Your camera appears to be in use by another app or blocked by the operating system. Close anything else using the camera and try again.",
-      };
+      return COPY.errors.busy;
     case "unsupported":
-      return {
-        title: "Webcam not supported",
-        body: "This browser doesn’t support getUserMedia. Try a recent Chrome, Edge, or Firefox over https/localhost.",
-      };
+      return COPY.errors.unsupported;
     default:
       return {
-        title: "Something went wrong",
-        body: generalError ?? webcamError ?? "An unexpected error occurred. Please try again.",
+        title: COPY.errors.generic.title,
+        body: generalError ?? webcamError ?? COPY.errors.generic.body,
       };
   }
 }
