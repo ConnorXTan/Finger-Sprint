@@ -1,165 +1,335 @@
 import type { StateMessage } from "@finger-sprint/shared";
 import type { Landmark } from "../game/handTracker";
 import type { LegPose } from "../game/fingerLegs";
+import {
+  BOIL_HZ_IDLE,
+  BOIL_HZ_PLAY,
+  BOIL_VARIANTS,
+  boilFrame,
+  hashJitter,
+  jitterPath,
+  ROUGH_LANDSCAPE,
+  VARIANT_SEEDS,
+  withAlpha,
+  PAPER_PALETTE,
+  type InkPalette,
+} from "./ink";
+import rough from "roughjs";
 
 /**
- * Pure canvas drawing. Given the latest authoritative state, paint one frame:
- * sky, parallax hills, a scrolling ground, the finish line, and an animated
- * runner whose stride speed follows the server's `speed`.
+ * The ink scene renderer — a moving pen drawing. Pure: paints exactly what
+ * RenderInput says, retains nothing between frames.
  *
- * The renderer reads `distance`/`position`/`speed` straight from the server and
- * never derives gameplay values itself — it only visualizes them.
+ *   ┌──────────────────────── one frame ─────────────────────┐
+ *   │ paper fill                                              │
+ *   │ blit far-hills tile  ─┐  pre-rendered rough.js tiles,   │
+ *   │ blit near-hills tile ─┤  3 boil variants each, blitted  │
+ *   │ blit ground tile     ─┘  at -(scroll % period)          │
+ *   │ finish line + red flag ─┐ dynamic: hashJitter polylines │
+ *   │ runner (+ghost, dust)  ─┤ (zero rough.js calls in the   │
+ *   │ progress line          ─┘  hot loop)                    │
+ *   └─────────────────────────────────────────────────────────┘
+ *
+ * The HUD is NOT here — it's a DOM overlay (Hud.tsx). See DESIGN.md.
  */
+
+export const SCENE_W = 960;
+export const SCENE_H = 540;
+
+const RUNNER_SCREEN_X_FRAC = 0.26; // runner sits ~26% across the scene
+const PX_PER_UNIT = 0.7; // world distance unit -> scene px
+const GROUND_FRAC = 0.78; // ground line at 78% of scene height
+
+/* ------------------------------ scene tiles ----------------------------- */
+
+interface TileLayer {
+  /** One canvas per boil variant, each `SCENE_W + 2 * period` scene-units wide. */
+  canvases: HTMLCanvasElement[];
+  /** Horizontal repeat period in scene units. */
+  period: number;
+  /** Scroll factor applied to distance (parallax depth). */
+  parallax: number;
+}
+
+export interface SceneTiles {
+  far: TileLayer;
+  near: TileLayer;
+  ground: TileLayer;
+  /** Physical pixels per scene unit the tiles were rendered at. */
+  pixelScale: number;
+}
+
+/**
+ * Build the static scroll tiles — the ONLY place rough.js runs for the scene.
+ * Called by GameView at mount / resize / palette change, never per frame.
+ */
+export function buildSceneTiles(palette: InkPalette, pixelScale: number): SceneTiles {
+  const groundY = SCENE_H * GROUND_FRAC;
+  return {
+    far: buildHillLayer(palette, pixelScale, {
+      period: 320,
+      parallax: 0.12,
+      baseY: groundY - 46,
+      groundY,
+      color: withAlpha(palette.ink, 0.28),
+      width: 1.4,
+      hatch: false,
+    }),
+    near: buildHillLayer(palette, pixelScale, {
+      period: 480,
+      parallax: 0.25,
+      baseY: groundY - 16,
+      groundY,
+      color: withAlpha(palette.ink, 0.55),
+      width: 1.8,
+      hatch: true,
+    }),
+    ground: buildGroundLayer(palette, pixelScale, groundY),
+    pixelScale,
+  };
+}
+
+function makeTileCanvas(
+  period: number,
+  pixelScale: number,
+): [HTMLCanvasElement, CanvasRenderingContext2D] {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil((SCENE_W + 2 * period) * pixelScale);
+  canvas.height = Math.ceil(SCENE_H * pixelScale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2d context unavailable for scene tile");
+  return [canvas, ctx];
+}
+
+function buildHillLayer(
+  palette: InkPalette,
+  pixelScale: number,
+  cfg: {
+    period: number;
+    parallax: number;
+    baseY: number;
+    groundY: number;
+    color: string;
+    width: number;
+    hatch: boolean;
+  },
+): TileLayer {
+  const canvases: HTMLCanvasElement[] = [];
+  for (let v = 0; v < BOIL_VARIANTS; v++) {
+    const [canvas, ctx] = makeTileCanvas(cfg.period, pixelScale);
+    const rc = rough.canvas(canvas);
+    const tileW = SCENE_W + 2 * cfg.period;
+    const humpW = cfg.period / 2; // one hump per half-period -> seamless loop
+    for (let x = 0; x < tileW; x += humpW) {
+      // Sample the quadratic hump into a polyline for rough's linearPath
+      // (device-pixel coordinates — rough draws unscaled on this canvas).
+      const pts: [number, number][] = [];
+      for (let i = 0; i <= 8; i++) {
+        const t = i / 8;
+        const px = (x + t * humpW) * pixelScale;
+        const py =
+          ((1 - t) * (1 - t) * cfg.groundY + 2 * (1 - t) * t * cfg.baseY + t * t * cfg.groundY) *
+          pixelScale;
+        pts.push([px, py]);
+      }
+      rc.linearPath(pts, {
+        ...ROUGH_LANDSCAPE,
+        seed: VARIANT_SEEDS[v] + x, // vary per hump, fixed per variant
+        stroke: cfg.color,
+        strokeWidth: cfg.width * pixelScale,
+      });
+      if (cfg.hatch) {
+        ctx.strokeStyle = withAlpha(palette.ink, 0.25);
+        ctx.lineWidth = pixelScale;
+        ctx.lineCap = "round";
+        for (let hx = x + humpW * 0.3; hx < x + humpW * 0.7; hx += 16) {
+          ctx.beginPath();
+          ctx.moveTo((hx + hashJitter(hx | 0, v) * 2) * pixelScale, (cfg.groundY - 9) * pixelScale);
+          ctx.lineTo((hx - 8) * pixelScale, (cfg.groundY + 3) * pixelScale);
+          ctx.stroke();
+        }
+      }
+    }
+    canvases.push(canvas);
+  }
+  return { canvases, period: cfg.period, parallax: cfg.parallax };
+}
+
+function buildGroundLayer(palette: InkPalette, pixelScale: number, groundY: number): TileLayer {
+  const period = 120;
+  const canvases: HTMLCanvasElement[] = [];
+  for (let v = 0; v < BOIL_VARIANTS; v++) {
+    const [canvas, ctx] = makeTileCanvas(period, pixelScale);
+    ctx.scale(pixelScale, pixelScale);
+    const tileW = SCENE_W + 2 * period;
+    ctx.lineCap = "round";
+    // Double ground line, hand-wobbled per variant.
+    ctx.strokeStyle = palette.ink;
+    ctx.lineWidth = 2.5;
+    wobbleLine(ctx, 0, tileW, groundY, v, 1.6, period / 3);
+    ctx.strokeStyle = withAlpha(palette.ink, 0.4);
+    ctx.lineWidth = 1;
+    wobbleLine(ctx, 0, tileW, groundY + 6, v + 7, 1.2, period / 3);
+    // Lane dashes (periodic with the tile).
+    ctx.strokeStyle = withAlpha(palette.ink, 0.45);
+    ctx.lineWidth = 2;
+    const dashY = groundY + (SCENE_H - groundY) * 0.42;
+    for (let x = 0; x < tileW; x += period / 2) {
+      ctx.beginPath();
+      ctx.moveTo(x + hashJitter(x | 0, v) * 2, dashY + hashJitter(x | 0, v, 3) * 1.5);
+      ctx.lineTo(x + 26, dashY + hashJitter((x | 0) + 1, v, 3) * 1.5);
+      ctx.stroke();
+    }
+    canvases.push(canvas);
+  }
+  return { canvases, period, parallax: 1 };
+}
+
+/**
+ * Wobbly straight line whose jitter repeats every `stepPx` — sampled on a
+ * fixed grid so the tile stays periodic.
+ */
+function wobbleLine(
+  ctx: CanvasRenderingContext2D,
+  x0: number,
+  x1: number,
+  y: number,
+  salt: number,
+  amp: number,
+  stepPx: number,
+): void {
+  ctx.beginPath();
+  let i = 0;
+  for (let x = x0; x <= x1; x += stepPx, i++) {
+    const jy = y + hashJitter(i % 3, 0, salt) * amp; // %3 keeps it period-repeating
+    if (i === 0) ctx.moveTo(x, jy);
+    else ctx.lineTo(x, jy);
+  }
+  ctx.stroke();
+}
+
+function blitTile(
+  ctx: CanvasRenderingContext2D,
+  layer: TileLayer,
+  variant: number,
+  distance: number,
+  pixelScale: number,
+): void {
+  const scroll = (distance * layer.parallax * PX_PER_UNIT) % layer.period;
+  const tile = layer.canvases[variant];
+  // Destination in scene units (ctx is scene-scaled); tile is pixelScale-sized.
+  ctx.drawImage(tile, -layer.period - scroll, 0, tile.width / pixelScale, tile.height / pixelScale);
+}
+
+/* -------------------------------- render -------------------------------- */
 
 export interface RenderInput {
   state: StateMessage | null;
   /**
    * Per-leg swing driven directly by the index + middle fingers, or null when
-   * no hand is tracked (the runner then falls back to a time-based idle jog).
+   * no hand is tracked (the runner then falls back to a time-based jog).
    */
   legPose: LegPose | null;
   trackLength: number;
-  /** performance.now() — drives idle animation independent of game speed. */
+  /** performance.now() — drives boil + idle animation. */
   nowMs: number;
+  /** idle = home scene (standing runner, 5Hz boil); play = live round. */
+  mode: "idle" | "play";
+  palette: InkPalette;
+  /** Pre-built scroll tiles (GameView owns their lifecycle); null skips layers. */
+  tiles: SceneTiles | null;
+  /** prefers-reduced-motion: pins the boil on variant 0. */
+  reducedMotion: boolean;
 }
 
-const RUNNER_SCREEN_X_FRAC = 0.26; // runner sits ~26% across the canvas
-const PX_PER_UNIT = 0.7; // world distance unit -> screen px (for the finish line)
-const GROUND_FRAC = 0.78; // ground line at 78% of canvas height
-
-export function renderGame(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  input: RenderInput,
-): void {
-  const { state, legPose, trackLength, nowMs } = input;
-  const distance = state?.distance ?? 0;
-  const speed = state?.speed ?? 0;
+export function renderGame(ctx: CanvasRenderingContext2D, input: RenderInput): void {
+  const { state, legPose, trackLength, nowMs, mode, palette, tiles, reducedMotion } = input;
+  const distance = mode === "play" ? (state?.distance ?? 0) : 0;
+  const speed = mode === "play" ? (state?.speed ?? 0) : 0;
   const position = state?.position ?? 0;
+  const hz = mode === "idle" ? BOIL_HZ_IDLE : BOIL_HZ_PLAY;
+  const frame = reducedMotion ? 0 : boilFrame(nowMs, hz);
 
-  const groundY = height * GROUND_FRAC;
-  const runnerX = width * RUNNER_SCREEN_X_FRAC;
+  const groundY = SCENE_H * GROUND_FRAC;
+  const runnerX = SCENE_W * RUNNER_SCREEN_X_FRAC;
 
-  drawSky(ctx, width, height);
-  drawHills(ctx, width, groundY, distance);
-  drawGround(ctx, width, height, groundY, distance);
-  drawFinishLine(ctx, runnerX, groundY, distance, trackLength);
-  drawRunner(ctx, runnerX, groundY, speed, nowMs, legPose);
-  drawProgressBar(ctx, width, position);
-}
+  // Paper.
+  ctx.fillStyle = palette.paper;
+  ctx.fillRect(0, 0, SCENE_W, SCENE_H);
 
-/* ------------------------------- scene --------------------------------- */
-
-function drawSky(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-  const sky = ctx.createLinearGradient(0, 0, 0, h);
-  sky.addColorStop(0, "#1b2a4a");
-  sky.addColorStop(0.55, "#33508a");
-  sky.addColorStop(1, "#8aa0c8");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, w, h);
-}
-
-function drawHills(ctx: CanvasRenderingContext2D, w: number, groundY: number, distance: number): void {
-  // Two parallax layers, scrolling slower than the ground for depth.
-  drawHillLayer(ctx, w, groundY, distance * 0.12, 220, "#2c3f63", groundY - 40);
-  drawHillLayer(ctx, w, groundY, distance * 0.25, 150, "#35517f", groundY - 10);
-}
-
-function drawHillLayer(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  groundY: number,
-  scroll: number,
-  spacing: number,
-  color: string,
-  baseY: number,
-): void {
-  ctx.fillStyle = color;
-  const offset = -(scroll % spacing);
-  for (let x = offset - spacing; x < w + spacing; x += spacing) {
-    ctx.beginPath();
-    ctx.moveTo(x, groundY);
-    ctx.quadraticCurveTo(x + spacing / 2, baseY, x + spacing, groundY);
-    ctx.closePath();
-    ctx.fill();
+  // Pre-rendered parallax layers.
+  if (tiles) {
+    blitTile(ctx, tiles.far, frame, distance, tiles.pixelScale);
+    blitTile(ctx, tiles.near, frame, distance, tiles.pixelScale);
+    blitTile(ctx, tiles.ground, frame, distance, tiles.pixelScale);
   }
+
+  drawFinishLine(ctx, palette, frame, runnerX, groundY, distance, trackLength);
+  drawRunner(ctx, palette, frame, runnerX, groundY, speed, nowMs, mode, legPose);
+  if (mode === "play") drawProgressLine(ctx, palette, frame, position);
 }
 
-function drawGround(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  groundY: number,
-  distance: number,
-): void {
-  ctx.fillStyle = "#243018";
-  ctx.fillRect(0, groundY, w, h - groundY);
-  ctx.fillStyle = "#2f4020";
-  ctx.fillRect(0, groundY, w, 6);
-
-  // Scrolling lane dashes to convey motion.
-  ctx.fillStyle = "rgba(255,255,255,0.18)";
-  const spacing = 60;
-  const dashW = 28;
-  const y = groundY + (h - groundY) * 0.45;
-  const offset = -((distance * PX_PER_UNIT) % spacing);
-  for (let x = offset - spacing; x < w + spacing; x += spacing) {
-    ctx.fillRect(x, y, dashW, 5);
-  }
-}
+/* ------------------------------ finish line ----------------------------- */
 
 function drawFinishLine(
   ctx: CanvasRenderingContext2D,
+  palette: InkPalette,
+  frame: number,
   runnerX: number,
   groundY: number,
   distance: number,
   trackLength: number,
 ): void {
-  // World x of the finish converted to screen x relative to the runner.
   const screenX = runnerX + (trackLength - distance) * PX_PER_UNIT;
-  if (screenX < -40 || screenX > 4000) return;
+  if (screenX < -40 || screenX > SCENE_W + 60) return;
 
   const top = groundY - 150;
-  // Pole
-  ctx.fillStyle = "#e8e8e8";
-  ctx.fillRect(screenX, top, 6, groundY - top);
-  // Checkered flag
-  const rows = 4;
-  const cols = 4;
-  const fw = 56;
-  const fh = 40;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      ctx.fillStyle = (r + c) % 2 === 0 ? "#111" : "#fafafa";
-      ctx.fillRect(screenX + 6 + c * (fw / cols), top + r * (fh / rows), fw / cols, fh / rows);
-    }
-  }
+  ctx.strokeStyle = palette.ink;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  jitterPath(ctx, [[screenX, groundY], [screenX + 2, top]], frame, 1.5, 11);
+
+  // The red flag — one of the four budgeted marks (DESIGN.md → red budget).
+  ctx.fillStyle = palette.signal;
+  ctx.strokeStyle = palette.signal;
+  ctx.lineWidth = 1.5;
+  const j = (i: number) => hashJitter(i, frame, 17) * 1.5;
+  ctx.beginPath();
+  ctx.moveTo(screenX + 2 + j(0), top + j(1));
+  ctx.lineTo(screenX + 54 + j(2), top + 16 + j(3));
+  ctx.lineTo(screenX + 2 + j(4), top + 32 + j(5));
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
 }
 
-/* ------------------------------- runner -------------------------------- */
+/* -------------------------------- runner -------------------------------- */
 
 function drawRunner(
   ctx: CanvasRenderingContext2D,
+  palette: InkPalette,
+  frame: number,
   x: number,
   groundY: number,
   speed: number,
   nowMs: number,
+  mode: "idle" | "play",
   legPose: LegPose | null,
 ): void {
-  // Each leg's swing. When a hand is tracked, the legs are puppeted directly by
-  // the index + middle fingers (index -> front leg, middle -> back leg) so the
-  // cartoon mirrors your real fingers. Otherwise fall back to a time-based jog.
   let legFront: number;
   let legBack: number;
   let bob: number;
-  if (legPose) {
+
+  if (mode === "idle") {
+    // Standing at the start line: relaxed stance, a slow breathing bob.
+    legFront = 0.18;
+    legBack = -0.12;
+    bob = Math.sin(nowMs / 900) * 1.5;
+  } else if (legPose) {
     legFront = legPose.index;
     legBack = legPose.middle;
-    // Bounce with how much the fingers are actually moving.
     bob = Math.min(9, (Math.abs(legFront) + Math.abs(legBack)) * 4.5);
   } else {
-    // Stride frequency grows with speed; there's always a gentle idle bob.
     const stride = (nowMs / 1000) * (3 + speed * 0.03);
     legFront = Math.sin(stride);
     legBack = -legFront;
@@ -167,151 +337,172 @@ function drawRunner(
   }
   const baseY = groundY - 44 - bob;
 
-  // Speed "whoosh" lines behind the runner.
-  if (speed > 30) {
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  // Ghost strokes: the previous boil frame still visible on the page.
+  const ghostFrame = (frame + BOIL_VARIANTS - 1) % BOIL_VARIANTS;
+  if (mode === "play" && speed > 5) {
+    drawRunnerFigure(
+      ctx,
+      withAlpha(palette.ink, 0.18),
+      ghostFrame,
+      x - 14,
+      baseY + 2,
+      legFront,
+      legBack,
+    );
+  }
+
+  // Speed whoosh lines.
+  if (mode === "play" && speed > 30) {
+    ctx.strokeStyle = withAlpha(palette.ink, 0.35);
     ctx.lineWidth = 2;
-    const lines = Math.min(6, Math.floor(speed / 60) + 1);
+    const lines = Math.min(5, Math.floor(speed / 60) + 1);
     for (let i = 0; i < lines; i++) {
-      const ly = baseY - 10 + i * 12;
-      const len = 24 + (speed % 60);
+      const ly = baseY - 8 + i * 12;
+      const len = 24 + (speed % 50);
+      jitterPath(ctx, [[x - 30 - i * 6, ly], [x - 30 - i * 6 - len, ly]], frame, 1.2, 23 + i);
+    }
+  }
+
+  // Dust: little pen scribble arcs kicked up behind the feet.
+  if (mode === "play" && speed > 12) {
+    ctx.strokeStyle = withAlpha(palette.ink, 0.4);
+    ctx.lineWidth = 1.5;
+    const count = Math.min(4, Math.floor(speed / 40) + 1);
+    for (let i = 0; i < count; i++) {
+      const px = x - 22 - ((nowMs / 4 + i * 37) % 56);
+      const py = groundY - ((nowMs / 6 + i * 23) % 18);
       ctx.beginPath();
-      ctx.moveTo(x - 28 - i * 6, ly);
-      ctx.lineTo(x - 28 - i * 6 - len, ly);
+      ctx.arc(px, py, 3 + (i % 2), 0, Math.PI * 1.6);
       ctx.stroke();
     }
   }
 
-  // Kicked-up dust, scaled by the current stepping pace.
-  const dustCount = Math.min(10, Math.floor(speed / 45));
-  ctx.fillStyle = "rgba(220,210,180,0.5)";
-  for (let i = 0; i < dustCount; i++) {
-    const px = x - 20 - ((nowMs / 4 + i * 37) % 60);
-    const py = groundY - ((nowMs / 6 + i * 23) % 22);
-    ctx.beginPath();
-    ctx.arc(px, py, 2 + (i % 3), 0, Math.PI * 2);
-    ctx.fill();
-  }
+  drawRunnerFigure(ctx, palette.ink, frame, x, baseY, legFront, legBack);
+}
 
+/** The stick figure itself — all stroke, hand-drawn head circle. */
+function drawRunnerFigure(
+  ctx: CanvasRenderingContext2D,
+  stroke: string,
+  frame: number,
+  x: number,
+  baseY: number,
+  legFront: number,
+  legBack: number,
+): void {
   ctx.save();
   ctx.translate(x, baseY);
-
-  // Two legs, each following its own finger.
-  ctx.strokeStyle = "#1b1b1b";
-  ctx.lineWidth = 6;
+  ctx.strokeStyle = stroke;
   ctx.lineCap = "round";
-  leg(ctx, legBack);
-  leg(ctx, legFront);
 
-  // Arms counter-swing against the legs for a natural gait.
   ctx.lineWidth = 5;
-  arm(ctx, -legBack);
-  arm(ctx, -legFront);
+  leg(ctx, legBack, frame, 31);
+  leg(ctx, legFront, frame, 37);
 
-  // Body
-  ctx.fillStyle = "#ff5a5f";
-  roundedRect(ctx, -12, -30, 24, 34, 9);
-  ctx.fill();
+  ctx.lineWidth = 4;
+  arm(ctx, -legBack, frame, 41);
+  arm(ctx, -legFront, frame, 43);
 
-  // Head
-  ctx.fillStyle = "#ffd8a8";
+  // Torso.
+  ctx.lineWidth = 5;
+  jitterPath(ctx, [[0, -28], [0, 4]], frame, 1.2, 47);
+
+  // Head: two overlapping open arcs, like a real pen circling twice.
+  ctx.lineWidth = 3.5;
+  const j = (i: number) => hashJitter(i, frame, 53) * 1.2;
   ctx.beginPath();
-  ctx.arc(0, -40, 11, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Headband (a little flair)
-  ctx.fillStyle = "#ffd43b";
-  ctx.fillRect(-11, -46, 22, 4);
+  ctx.arc(j(0), -40 + j(1), 11, 0.1, Math.PI * 2 - 0.15);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(j(2), -40 + j(3), 11.5, Math.PI * 0.7, Math.PI * 1.9);
+  ctx.stroke();
 
   ctx.restore();
 }
 
-function leg(ctx: CanvasRenderingContext2D, swing: number): void {
-  const hipX = 0;
-  const hipY = 4;
-  const kneeX = hipX + swing * 10;
-  const kneeY = hipY + 16;
+function leg(ctx: CanvasRenderingContext2D, swing: number, frame: number, salt: number): void {
+  const kneeX = swing * 10;
   const footX = kneeX + swing * 8;
-  const footY = kneeY + 16;
-  ctx.beginPath();
-  ctx.moveTo(hipX, hipY);
-  ctx.lineTo(kneeX, kneeY);
-  ctx.lineTo(footX, footY);
-  ctx.stroke();
+  jitterPath(ctx, [[0, 4], [kneeX, 20], [footX, 36]], frame, 1.3, salt);
 }
 
-function arm(ctx: CanvasRenderingContext2D, swing: number): void {
-  ctx.beginPath();
-  ctx.moveTo(0, -22);
-  ctx.lineTo(swing * 12, -8);
-  ctx.stroke();
+function arm(ctx: CanvasRenderingContext2D, swing: number, frame: number, salt: number): void {
+  jitterPath(ctx, [[0, -22], [swing * 12, -8]], frame, 1.2, salt);
 }
 
-/* ------------------------------ progress ------------------------------- */
+/* ----------------------------- progress line ---------------------------- */
 
-function drawProgressBar(ctx: CanvasRenderingContext2D, w: number, position: number): void {
-  const pad = 24;
-  const barW = w - pad * 2;
-  const barH = 8;
-  const y = 18;
-  ctx.fillStyle = "rgba(0,0,0,0.35)";
-  roundedRect(ctx, pad, y, barW, barH, 4);
-  ctx.fill();
-  ctx.fillStyle = "#ffd43b";
-  roundedRect(ctx, pad, y, Math.max(barH, barW * position), barH, 4);
-  ctx.fill();
-
-  // Runner pip + finish flag glyph.
-  ctx.fillStyle = "#fff";
-  ctx.beginPath();
-  ctx.arc(pad + barW * position, y + barH / 2, 7, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-/* ------------------------------- helpers ------------------------------- */
-
-function roundedRect(
+function drawProgressLine(
   ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
+  palette: InkPalette,
+  frame: number,
+  position: number,
 ): void {
-  const radius = Math.min(r, w / 2, h / 2);
+  const pad = 40;
+  const w = SCENE_W - pad * 2;
+  const y = 32;
+  const p = Math.max(0, Math.min(1, position));
+
+  ctx.lineCap = "round";
+  // Track (hairline).
+  ctx.strokeStyle = withAlpha(palette.ink, 0.35);
+  ctx.lineWidth = 1.5;
+  jitterPath(ctx, [[pad, y], [pad + w, y - 2]], frame, 1, 61);
+  // Covered distance (full ink).
+  if (p > 0.005) {
+    ctx.strokeStyle = palette.ink;
+    ctx.lineWidth = 4;
+    jitterPath(ctx, [[pad, y], [pad + w * p, y - 2 * p]], frame, 1, 67);
+  }
+  // Runner pip.
+  ctx.fillStyle = palette.paper;
+  ctx.strokeStyle = palette.ink;
+  ctx.lineWidth = 2.5;
   ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + w, y, x + w, y + h, radius);
-  ctx.arcTo(x + w, y + h, x, y + h, radius);
-  ctx.arcTo(x, y + h, x, y, radius);
-  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.arc(pad + w * p, y - 2 * p, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  // Finish mark: tiny red flag at the end of the line (same budgeted concept).
+  ctx.fillStyle = palette.signal;
+  ctx.beginPath();
+  ctx.moveTo(pad + w, y - 16);
+  ctx.lineTo(pad + w + 11, y - 12);
+  ctx.lineTo(pad + w, y - 8);
   ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = palette.signal;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(pad + w, y - 16);
+  ctx.lineTo(pad + w, y - 2);
+  ctx.stroke();
 }
+
+/* ------------------------------ hand overlay ---------------------------- */
 
 /**
- * Draw hand landmarks onto a (usually small) overlay canvas — the webcam
- * thumbnail. Mirrored to match the selfie-view video.
+ * Ink hand contours for the webcam thumbnail — index + middle bold (they are
+ * the legs), the rest faint. Each stroke gets a paper-colored halo underlay
+ * so ink reads on live video.
  */
 export function drawHandOverlay(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   landmarks: Landmark[] | null,
+  palette: InkPalette = PAPER_PALETTE,
 ): void {
   ctx.clearRect(0, 0, width, height);
   if (!landmarks || landmarks.length < 21) return;
 
-  const mx = (x: number) => (1 - x) * width; // mirror horizontally
+  const mx = (x: number) => (1 - x) * width; // mirror to match selfie view
   const my = (y: number) => y * height;
 
-  // The two fingers that actually control the runner (the "legs").
   const LEG_BONES: [number, number][] = [
-    [5, 6], [6, 7], [7, 8], // index
-    [9, 10], [10, 11], [11, 12], // middle
+    [5, 6], [6, 7], [7, 8],
+    [9, 10], [10, 11], [11, 12],
   ];
-  const LEG_TIPS = new Set([8, 12]);
-
-  // The rest of the standard MediaPipe hand skeleton (drawn dim — inactive).
+  const LEG_TIPS = [8, 12];
   const OTHER_BONES: [number, number][] = [
     [0, 1], [1, 2], [2, 3], [3, 4],
     [0, 5], [5, 9], [9, 13], [13, 14], [14, 15], [15, 16],
@@ -319,31 +510,32 @@ export function drawHandOverlay(
     [0, 17],
   ];
 
-  // Dim, inactive skeleton.
-  ctx.strokeStyle = "rgba(120,180,210,0.35)";
-  ctx.lineWidth = 2;
-  for (const [a, b] of OTHER_BONES) {
-    ctx.beginPath();
-    ctx.moveTo(mx(landmarks[a].x), my(landmarks[a].y));
-    ctx.lineTo(mx(landmarks[b].x), my(landmarks[b].y));
-    ctx.stroke();
-  }
+  const strokeBones = (bones: [number, number][], color: string, w: number) => {
+    // Halo underlay first, then ink — readable over any video.
+    for (const [style, lw] of [
+      [withAlpha(palette.paper, 0.85), w + 2.5],
+      [color, w],
+    ] as const) {
+      ctx.strokeStyle = style as string;
+      ctx.lineWidth = lw as number;
+      ctx.lineCap = "round";
+      for (const [a, b] of bones) {
+        ctx.beginPath();
+        ctx.moveTo(mx(landmarks[a].x), my(landmarks[a].y));
+        ctx.lineTo(mx(landmarks[b].x), my(landmarks[b].y));
+        ctx.stroke();
+      }
+    }
+  };
 
-  // Bright, active "legs": index + middle fingers.
-  ctx.strokeStyle = "rgba(120,255,160,0.95)";
-  ctx.lineWidth = 4;
-  for (const [a, b] of LEG_BONES) {
-    ctx.beginPath();
-    ctx.moveTo(mx(landmarks[a].x), my(landmarks[a].y));
-    ctx.lineTo(mx(landmarks[b].x), my(landmarks[b].y));
-    ctx.stroke();
-  }
+  strokeBones(OTHER_BONES, withAlpha(palette.ink, 0.35), 1.5);
+  strokeBones(LEG_BONES, palette.ink, 3);
 
-  landmarks.forEach((lm, i) => {
-    const isTip = LEG_TIPS.has(i);
-    ctx.fillStyle = isTip ? "#9dff9d" : "rgba(255,212,59,0.45)";
+  // Fingertip dots — solid ink (red stays budgeted elsewhere).
+  ctx.fillStyle = palette.ink;
+  for (const i of LEG_TIPS) {
     ctx.beginPath();
-    ctx.arc(mx(lm.x), my(lm.y), isTip ? 5 : 3, 0, Math.PI * 2);
+    ctx.arc(mx(landmarks[i].x), my(landmarks[i].y), 4, 0, Math.PI * 2);
     ctx.fill();
-  });
+  }
 }

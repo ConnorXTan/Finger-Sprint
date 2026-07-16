@@ -12,9 +12,12 @@
   },
   "dependencies": {
     "@finger-sprint/shared": "*",
+    "@fontsource/caveat": "^5.2.8",
+    "@fontsource/patrick-hand": "^5.2.8",
     "@mediapipe/tasks-vision": "^0.10.18",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "roughjs": "^4.6.6"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
