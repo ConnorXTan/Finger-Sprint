@@ -31,6 +31,11 @@ export function GameView({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const tilesRef = useRef<SceneTiles | null>(null);
   const scaleRef = useRef(1); // physical px per scene unit
+  // Bumped whenever the backing store is rebuilt (resize/theme). The idle
+  // dirty-flag must redraw after a rebuild — setting canvas.width erases the
+  // canvas, and a boil-frame-only flag would leave it blank until the next
+  // tick (or forever under prefers-reduced-motion).
+  const sceneVersionRef = useRef(0);
   const [dark, setDark] = useState(
     () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
   );
@@ -59,25 +64,40 @@ export function GameView({
     if (!canvas) return;
     const palette = dark ? MIDNIGHT_PALETTE : PAPER_PALETTE;
 
-    const fit = () => {
+    const fit = (force: boolean) => {
       const cssW = canvas.clientWidth || SCENE_W;
       const dpr = window.devicePixelRatio || 1;
       const scale = (cssW / SCENE_W) * dpr;
+      // ResizeObserver's guaranteed initial delivery (and no-op resizes)
+      // would otherwise rebuild 9 rough.js tile canvases for nothing.
+      if (!force && scale === scaleRef.current && tilesRef.current) return;
       canvas.width = Math.round(SCENE_W * scale);
       canvas.height = Math.round(SCENE_H * scale);
       scaleRef.current = scale;
       tilesRef.current = buildSceneTiles(palette, scale);
+      sceneVersionRef.current++;
     };
-    fit();
-    const ro = new ResizeObserver(fit);
+    fit(true); // force: theme flips re-run this effect and must rebuild tiles
+    // Debounced: a window drag fires ResizeObserver continuously, and each
+    // fit() rebuilds 9 rough.js tile canvases — only rebuild once the drag
+    // settles.
+    let debounce: ReturnType<typeof setTimeout> | undefined;
+    const ro = new ResizeObserver(() => {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => fit(false), 150);
+    });
     ro.observe(canvas);
-    return () => ro.disconnect();
+    return () => {
+      clearTimeout(debounce);
+      ro.disconnect();
+    };
   }, [dark]);
 
   // The draw loop.
   useEffect(() => {
     let raf = 0;
     let lastIdleFrame = -1;
+    let lastSceneVersion = -1;
     const palette = dark ? MIDNIGHT_PALETTE : PAPER_PALETTE;
 
     const draw = (t: number) => {
@@ -86,15 +106,14 @@ export function GameView({
       const ctx = canvas?.getContext("2d");
       if (!canvas || !ctx) return;
 
-      // Idle dirty-flag: the home scene only changes on boil ticks.
-      if (mode === "idle" && !reducedMotion) {
-        const f = boilFrame(t, BOIL_HZ_IDLE);
-        if (f === lastIdleFrame) return;
+      // Idle dirty-flag: the home scene only changes on boil ticks (frame 0
+      // forever under reduced motion) or when the backing store was rebuilt.
+      if (mode === "idle") {
+        const f = reducedMotion ? 0 : boilFrame(t, BOIL_HZ_IDLE);
+        if (f === lastIdleFrame && lastSceneVersion === sceneVersionRef.current) return;
         lastIdleFrame = f;
-      } else if (mode === "idle" && reducedMotion && lastIdleFrame === 0) {
-        return; // static scene already drawn
+        lastSceneVersion = sceneVersionRef.current;
       }
-      if (mode === "idle" && reducedMotion) lastIdleFrame = 0;
 
       const scale = scaleRef.current;
       ctx.setTransform(scale, 0, 0, scale, 0, 0);
