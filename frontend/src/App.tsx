@@ -249,6 +249,16 @@ function ResultsScreen({
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Payoff choreography: focus arrives only after the form has faded in
+  // (~650ms) — never dump the player into a text input at the emotional peak.
+  // Reduced motion skips the wait along with the animation.
+  useEffect(() => {
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const t = setTimeout(() => nameInputRef.current?.focus(), reduced ? 0 : 700);
+    return () => clearTimeout(t);
+  }, []);
 
   // Win = actually reached the finish line; otherwise the timer ran out.
   const trackLength = engine.session?.trackLength ?? Infinity;
@@ -300,6 +310,7 @@ function ResultsScreen({
             <label className="ink-input-wrap">
               <span className="label">{COPY.results.nameLabel}</span>
               <input
+                ref={nameInputRef}
                 className="ink-input"
                 type="text"
                 placeholder={COPY.results.namePlaceholder}
