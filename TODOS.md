@@ -17,3 +17,16 @@ Design debt deferred from the 2026-07-15 ink-on-paper design review
   live round after accidental reload. Why: reload mid-round orphans the round today; T10's
   disconnect wiring covers socket drops, not page loss. Needs backend rejoin semantics
   (new scope, from 2026-07-15 eng review). Depends on: nothing. (human: ~half day / CC: ~30min)
+- [ ] **Idle runner arms** — hanging arms are ~2px swings, nearly invisible; give the
+  stance readable arms. Deferred cosmetic from /qa 2026-07-16. (CC: ~5min)
+- [ ] **Maintainability batch (from /review specialists, 2026-07-16)** — copy.ts
+  consolidation (6 hardcoded user-facing strings incl. two error messages with
+  inconsistent voice), palette-sync guard test (hexes duplicated across ink.ts /
+  styles.css / index.html), Leaderboard Row extraction + pinned.id decoupling,
+  boilHzFor() shared helper, DEFAULT_TRACK_LENGTH constant, grain-tile out of the
+  DOM-free kernel, two stale diagram touch-ups. (CC: ~20min)
+- [ ] **Focus-visible double-ring** — pre-render a distinct second offset ring in
+  inkSvg so keyboard focus reads differently from hover (currently dashed bold
+  stand-in). (CC: ~10min)
+- [ ] **qa-bot leaderboard row** — /qa seeded a score-0 entry (id 6) onto the live
+  board via the API; delete from backend SQLite when convenient.
