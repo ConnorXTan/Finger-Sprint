@@ -1,0 +1,17 @@
+# Render Blueprint — deploys the whole game as one Node web service.
+# The backend serves the built frontend, the REST API, and the WebSocket,
+# so a single free-plan service covers everything.
+#
+# Free-plan caveats (accepted deliberately):
+#   - the service sleeps after ~15 min idle (first visitor waits for a cold start)
+#   - no persistent disk, so the SQLite leaderboard resets on deploy/restart
+# Upgrading to a paid plan + adding a `disk:` for ./data fixes both.
+services:
+  - type: web
+    name: finger-sprint
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
