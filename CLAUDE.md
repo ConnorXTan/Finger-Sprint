@@ -27,6 +27,17 @@ read it before frontend/visual work. Multiple Claude Code sessions may work this
 repo concurrently (tmux `cc` bridge); re-check `git log` before relying on
 earlier file reads.
 
+## Deploy Configuration
+
+- Platform: render
+- Production URL: https://finger-sprint.onrender.com
+- Service: finger-sprint (free plan, defined in render.yaml)
+- Deploys: automatic on every push to main (Render watches the repo)
+- Health check: https://finger-sprint.onrender.com/api/health
+- Free-tier caveats: service sleeps after ~15 min idle (~50s cold start for the
+  first visitor); no persistent disk, so the SQLite leaderboard resets on each
+  deploy/restart. Paid plan + a `disk:` block in render.yaml fixes both.
+
 ## Skill routing
 
 When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
